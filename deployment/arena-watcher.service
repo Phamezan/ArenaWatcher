@@ -1,0 +1,25 @@
+[Unit]
+Description=Arena Watcher Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arena-watcher
+Group=arena-watcher
+WorkingDirectory=/opt/arena-watcher
+EnvironmentFile=/etc/arena-watcher/arena-watcher.env
+ExecStart=/usr/bin/dotnet /opt/arena-watcher/DiscordBot.dll
+Restart=always
+RestartSec=15
+KillSignal=SIGTERM
+TimeoutStopSec=30
+SyslogIdentifier=arena-watcher
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/arena-watcher /opt/arena-watcher/data
+
+[Install]
+WantedBy=multi-user.target
