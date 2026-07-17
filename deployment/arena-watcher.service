@@ -5,9 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/arena-watcher/current
-EnvironmentFile=/root/arena-watcher/config/arena-watcher.env
-ExecStart=/usr/bin/dotnet /root/arena-watcher/current/DiscordBot.dll
+User=michaelsik12
+WorkingDirectory=/home/michaelsik12/arena-watcher/current
+EnvironmentFile=/home/michaelsik12/arena-watcher/config/arena-watcher.env
+ExecStart=/usr/bin/dotnet /home/michaelsik12/arena-watcher/current/DiscordBot.dll
 Restart=always
 RestartSec=15
 KillSignal=SIGTERM

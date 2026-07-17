@@ -2,8 +2,11 @@
 
 This project runs as a long-lived `systemd` service on a Linux VPS, built
 directly from a git checkout on the box — no local publish/rsync step.
-Runs as root under `~/arena-watcher` (`/root/arena-watcher`); no dedicated
-service user.
+Runs as your regular login user under `~/arena-watcher` (no dedicated
+service user, no root needed — the bot only makes outbound HTTP calls).
+
+`systemctl`/`journalctl` themselves still need `sudo` since they manage
+system-wide services, but the app itself runs unprivileged.
 
 ## Layout
 
@@ -16,10 +19,15 @@ service user.
 
 `current/` gets replaced on every deploy — never put config or state there.
 
+The systemd unit (`deployment/arena-watcher.service`) hardcodes both the
+`User=` and the absolute paths under that user's home directory — edit it
+if your login user isn't `michaelsik12`.
+
 ## First-time Setup
 
 Install the .NET SDK (needed to build on the box; `dotnet-sdk-8.0` or
-whatever matches this project's target framework), then as root:
+whatever matches this project's target framework), then as your regular
+user (no sudo needed for these steps):
 
 ```bash
 mkdir -p ~/arena-watcher/config ~/arena-watcher/data
@@ -30,12 +38,15 @@ dotnet publish -c Release -o ~/arena-watcher/current
 
 Copy `appsettings.example.json` to `~/arena-watcher/config/appsettings.json`
 and edit tracked players. Set `SeenMatchesPath` in it to
-`/root/arena-watcher/data/seen-matches.json`. Keep secrets out of this file.
+`/home/<you>/arena-watcher/data/seen-matches.json`. Keep secrets out of
+this file (either leave `RiotApiKey`/`DiscordWebhookUrl`/etc as
+`"replace-me"` and set them via the env file below, or just fill real
+values in directly — both work, see AppConfigLoader.cs).
 
 Create `~/arena-watcher/config/arena-watcher.env`:
 
 ```bash
-ARENA_BOT_CONFIG=/root/arena-watcher/config/appsettings.json
+ARENA_BOT_CONFIG=/home/<you>/arena-watcher/config/appsettings.json
 RIOT_API_KEY=RGAPI-your-personal-key
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
@@ -53,17 +64,17 @@ chmod 600 ~/arena-watcher/config/arena-watcher.env ~/arena-watcher/config/appset
 ## Install Service
 
 ```bash
-cp ~/arena-watcher/src/deployment/arena-watcher.service /etc/systemd/system/arena-watcher.service
-systemctl daemon-reload
-systemctl enable arena-watcher
-systemctl start arena-watcher
+sudo cp ~/arena-watcher/src/deployment/arena-watcher.service /etc/systemd/system/arena-watcher.service
+sudo systemctl daemon-reload
+sudo systemctl enable arena-watcher
+sudo systemctl start arena-watcher
 ```
 
 Check status and logs:
 
 ```bash
-systemctl status arena-watcher
-journalctl -u arena-watcher -f
+sudo systemctl status arena-watcher
+sudo journalctl -u arena-watcher -f
 ```
 
 ## Redeploying (new code)
@@ -72,14 +83,14 @@ journalctl -u arena-watcher -f
 cd ~/arena-watcher/src
 git pull
 dotnet publish -c Release -o ~/arena-watcher/current
-systemctl restart arena-watcher
+sudo systemctl restart arena-watcher
 ```
 
 ## Updating Tracked Players / Config
 
 ```bash
 nano ~/arena-watcher/config/appsettings.json
-systemctl restart arena-watcher
+sudo systemctl restart arena-watcher
 ```
 
 ## Useful Commands
@@ -87,17 +98,17 @@ systemctl restart arena-watcher
 Stop:
 
 ```bash
-systemctl stop arena-watcher
+sudo systemctl stop arena-watcher
 ```
 
 Restart:
 
 ```bash
-systemctl restart arena-watcher
+sudo systemctl restart arena-watcher
 ```
 
 View recent logs:
 
 ```bash
-journalctl -u arena-watcher -n 100
+sudo journalctl -u arena-watcher -n 100
 ```
