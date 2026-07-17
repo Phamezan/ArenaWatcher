@@ -1,4 +1,5 @@
 using DiscordBot.Configuration;
+using DiscordBot.Infrastructure.ArenaTracker;
 using DiscordBot.Infrastructure.Discord;
 using DiscordBot.Infrastructure.LeagueAssets;
 using DiscordBot.Infrastructure.Riot;
@@ -11,6 +12,7 @@ namespace DiscordBot.Services;
 public sealed class ArenaWatcherService(
     IRiotClient riotClient,
     IDiscordNotifier discordNotifier,
+    IArenaTrackerNotifier arenaTrackerNotifier,
     ILeagueAssetProvider leagueAssetProvider,
     IMatchCardRenderer matchCardRenderer,
     SeenMatchStore seenMatchStore,
@@ -374,6 +376,8 @@ public sealed class ArenaWatcherService(
             return;
         }
 
+        await SyncWinsToArenaTrackerAsync(winners, matchId, cancellationToken);
+
         if (winners.Length == 1)
         {
             var card = await RenderCardAsync(winners[0], cancellationToken);
@@ -388,6 +392,28 @@ public sealed class ArenaWatcherService(
         }
 
         MarkSeenForParticipants(trackedParticipants, matchId);
+    }
+
+    private async Task SyncWinsToArenaTrackerAsync(
+        IReadOnlyList<MatchSummary> winners,
+        string matchId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var winner in winners)
+        {
+            try
+            {
+                await arenaTrackerNotifier.NotifyWinAsync(winner.PlayerName, winner.ChampionName, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not sync {winner.PlayerName}'s win to arena-tracker for {matchId}: {ex.Message}");
+            }
+        }
     }
 
     private void MarkSeenForParticipants(

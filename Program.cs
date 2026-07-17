@@ -1,4 +1,5 @@
 using DiscordBot.Configuration;
+using DiscordBot.Infrastructure.ArenaTracker;
 using DiscordBot.Infrastructure.Discord;
 using DiscordBot.Infrastructure.LeagueAssets;
 using DiscordBot.Infrastructure.Riot;
@@ -12,10 +13,14 @@ using var httpClient = new HttpClient();
 
 var riotClient = new RiotClient(httpClient, config.RiotApiKey, config.RegionalRoute);
 var discordClient = new DiscordWebhookClient(httpClient, config.DiscordWebhookUrl);
+IArenaTrackerNotifier arenaTrackerNotifier =
+    string.IsNullOrWhiteSpace(config.ArenaTrackerWebhookUrl) || string.IsNullOrWhiteSpace(config.ArenaTrackerSyncKey)
+        ? new NullArenaTrackerNotifier()
+        : new ArenaTrackerSyncClient(httpClient, config.ArenaTrackerWebhookUrl, config.ArenaTrackerSyncKey);
 var leagueAssetProvider = new LeagueAssetProvider(httpClient);
 var matchCardRenderer = new MatchCardRenderer(httpClient);
 var seenMatchStore = await SeenMatchStore.LoadAsync(config.SeenMatchesPath);
-var watcher = new ArenaWatcherService(riotClient, discordClient, leagueAssetProvider, matchCardRenderer, seenMatchStore, config);
+var watcher = new ArenaWatcherService(riotClient, discordClient, arenaTrackerNotifier, leagueAssetProvider, matchCardRenderer, seenMatchStore, config);
 
 if (args.Contains("--post-latest", StringComparer.OrdinalIgnoreCase))
 {

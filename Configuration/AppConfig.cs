@@ -6,4 +6,6 @@ public sealed record AppConfig(
     string RegionalRoute,
     int PollIntervalSeconds,
     string SeenMatchesPath,
-    List<PlayerConfig> TrackedPlayers);
+    List<PlayerConfig> TrackedPlayers,
+    string? ArenaTrackerWebhookUrl = null,
+    string? ArenaTrackerSyncKey = null);
