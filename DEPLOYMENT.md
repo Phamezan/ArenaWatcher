@@ -2,42 +2,40 @@
 
 This project runs as a long-lived `systemd` service on a Linux VPS, built
 directly from a git checkout on the box — no local publish/rsync step.
+Runs as root under `~/arena-watcher` (`/root/arena-watcher`); no dedicated
+service user.
 
 ## Layout
 
 ```
-/opt/arena-watcher/src/       git checkout, source of truth
-/opt/arena-watcher/current/   dotnet publish output, what systemd runs
-/etc/arena-watcher/           appsettings.json + secrets env file
-/var/lib/arena-watcher/       seen-matches.json (runtime state)
+~/arena-watcher/src/       git checkout, source of truth
+~/arena-watcher/current/   dotnet publish output, what systemd runs
+~/arena-watcher/config/    appsettings.json + arena-watcher.env
+~/arena-watcher/data/      seen-matches.json (runtime state)
 ```
 
-`current/` and everything under it gets replaced on every deploy — never
-put config or state there.
+`current/` gets replaced on every deploy — never put config or state there.
 
 ## First-time Setup
 
 Install the .NET SDK (needed to build on the box; `dotnet-sdk-8.0` or
-whatever matches this project's target framework), then:
+whatever matches this project's target framework), then as root:
 
 ```bash
-sudo useradd --system --home /opt/arena-watcher --shell /usr/sbin/nologin arena-watcher
-sudo mkdir -p /opt/arena-watcher/src /etc/arena-watcher /var/lib/arena-watcher
-sudo chown -R arena-watcher:arena-watcher /opt/arena-watcher /var/lib/arena-watcher
-sudo chmod 750 /etc/arena-watcher
-
-sudo -u arena-watcher git clone https://github.com/Phamezan/ArenaWatcher.git /opt/arena-watcher/src
-cd /opt/arena-watcher/src
-sudo -u arena-watcher dotnet publish -c Release -o /opt/arena-watcher/current
+mkdir -p ~/arena-watcher/config ~/arena-watcher/data
+git clone https://github.com/Phamezan/ArenaWatcher.git ~/arena-watcher/src
+cd ~/arena-watcher/src
+dotnet publish -c Release -o ~/arena-watcher/current
 ```
 
-Copy `appsettings.example.json` to `/etc/arena-watcher/appsettings.json` and
-edit tracked players. Keep secrets out of this file.
+Copy `appsettings.example.json` to `~/arena-watcher/config/appsettings.json`
+and edit tracked players. Set `SeenMatchesPath` in it to
+`/root/arena-watcher/data/seen-matches.json`. Keep secrets out of this file.
 
-Create `/etc/arena-watcher/arena-watcher.env`:
+Create `~/arena-watcher/config/arena-watcher.env`:
 
 ```bash
-ARENA_BOT_CONFIG=/etc/arena-watcher/appsettings.json
+ARENA_BOT_CONFIG=/root/arena-watcher/config/appsettings.json
 RIOT_API_KEY=RGAPI-your-personal-key
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
@@ -48,43 +46,40 @@ ARENA_TRACKER_WEBHOOK_URL=https://arena-tracker-sync.<you>.workers.dev
 ARENA_TRACKER_SYNC_KEY=<same SYNC_KEY set on the Worker>
 ```
 
-Protect the config and env files:
-
 ```bash
-sudo chown root:arena-watcher /etc/arena-watcher/arena-watcher.env /etc/arena-watcher/appsettings.json
-sudo chmod 640 /etc/arena-watcher/arena-watcher.env /etc/arena-watcher/appsettings.json
+chmod 600 ~/arena-watcher/config/arena-watcher.env ~/arena-watcher/config/appsettings.json
 ```
 
 ## Install Service
 
 ```bash
-sudo cp /opt/arena-watcher/src/deployment/arena-watcher.service /etc/systemd/system/arena-watcher.service
-sudo systemctl daemon-reload
-sudo systemctl enable arena-watcher
-sudo systemctl start arena-watcher
+cp ~/arena-watcher/src/deployment/arena-watcher.service /etc/systemd/system/arena-watcher.service
+systemctl daemon-reload
+systemctl enable arena-watcher
+systemctl start arena-watcher
 ```
 
 Check status and logs:
 
 ```bash
-sudo systemctl status arena-watcher
-sudo journalctl -u arena-watcher -f
+systemctl status arena-watcher
+journalctl -u arena-watcher -f
 ```
 
 ## Redeploying (new code)
 
 ```bash
-cd /opt/arena-watcher/src
-sudo -u arena-watcher git pull
-sudo -u arena-watcher dotnet publish -c Release -o /opt/arena-watcher/current
-sudo systemctl restart arena-watcher
+cd ~/arena-watcher/src
+git pull
+dotnet publish -c Release -o ~/arena-watcher/current
+systemctl restart arena-watcher
 ```
 
 ## Updating Tracked Players / Config
 
 ```bash
-sudo nano /etc/arena-watcher/appsettings.json
-sudo systemctl restart arena-watcher
+nano ~/arena-watcher/config/appsettings.json
+systemctl restart arena-watcher
 ```
 
 ## Useful Commands
@@ -92,17 +87,17 @@ sudo systemctl restart arena-watcher
 Stop:
 
 ```bash
-sudo systemctl stop arena-watcher
+systemctl stop arena-watcher
 ```
 
 Restart:
 
 ```bash
-sudo systemctl restart arena-watcher
+systemctl restart arena-watcher
 ```
 
 View recent logs:
 
 ```bash
-sudo journalctl -u arena-watcher -n 100
+journalctl -u arena-watcher -n 100
 ```
