@@ -11,13 +11,22 @@ system-wide services, but the app itself runs unprivileged.
 ## Layout
 
 ```
-~/arena-watcher/src/       git checkout, source of truth
-~/arena-watcher/current/   dotnet publish output, what systemd runs
-~/arena-watcher/config/    appsettings.json + arena-watcher.env
-~/arena-watcher/data/      seen-matches.json (runtime state)
+~/arena-watcher/src/          git checkout, source of truth
+~/arena-watcher/current/      dotnet publish output, what systemd runs
+~/arena-watcher/config/       appsettings.json (read by the app itself)
+~/arena-watcher/data/         seen-matches.json (runtime state)
+/etc/arena-watcher/           arena-watcher.env (secrets, read by systemd)
 ```
 
 `current/` gets replaced on every deploy — never put config or state there.
+
+`arena-watcher.env` specifically has to live under `/etc`, not the home
+directory: on SELinux-enforcing distros (AlmaLinux included) systemd's own
+`EnvironmentFile=` loader is denied access to home-directory files
+regardless of Unix permissions — `restorecon` on the home dir does not fix
+this, it's a distinct policy for files read directly by systemd at service
+start. `appsettings.json` doesn't have this problem since the .NET app
+reads it itself at runtime, not systemd.
 
 The systemd unit (`deployment/arena-watcher.service`) hardcodes both the
 `User=` and the absolute paths under that user's home directory — edit it
@@ -43,7 +52,11 @@ this file (either leave `RiotApiKey`/`DiscordWebhookUrl`/etc as
 `"replace-me"` and set them via the env file below, or just fill real
 values in directly — both work, see AppConfigLoader.cs).
 
-Create `~/arena-watcher/config/arena-watcher.env`:
+Create `/etc/arena-watcher/arena-watcher.env` (needs root):
+
+```bash
+sudo mkdir -p /etc/arena-watcher
+```
 
 ```bash
 ARENA_BOT_CONFIG=/home/<you>/arena-watcher/config/appsettings.json
@@ -58,7 +71,9 @@ ARENA_TRACKER_SYNC_KEY=<same SYNC_KEY set on the Worker>
 ```
 
 ```bash
-chmod 600 ~/arena-watcher/config/arena-watcher.env ~/arena-watcher/config/appsettings.json
+sudo chown root:<you> /etc/arena-watcher/arena-watcher.env
+sudo chmod 640 /etc/arena-watcher/arena-watcher.env
+chmod 600 ~/arena-watcher/config/appsettings.json
 ```
 
 ## Install Service
