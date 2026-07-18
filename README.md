@@ -34,6 +34,7 @@ That starts the polling loop (`RunAsync`), checking tracked players every
 
 ```bash
 dotnet run -- --post-latest              # post each tracked player's most recent match, regardless of result
+dotnet run -- --post-latest-for "GameName#TagLine"  # same, but just one player -- e.g. recovering a win missed during bot downtime. Also syncs to arena-tracker if it was an Arena win.
 dotnet run -- --inspect-latest           # print full participant breakdown for each player's most recent match, no posting
 dotnet run -- --post-latest-group-test   # post a grouped result card for everyone who shares the latest match's placement
 dotnet run -- --render-layout-test       # render a sample card to disk without hitting Discord, for layout iteration

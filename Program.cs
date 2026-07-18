@@ -28,6 +28,12 @@ if (args.Contains("--post-latest", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--post-latest-for", StringComparer.OrdinalIgnoreCase))
+{
+    await watcher.PostLatestMatchForPlayerAsync(GetPostLatestForRiotId(args));
+    return;
+}
+
 if (args.Contains("--inspect-latest", StringComparer.OrdinalIgnoreCase))
 {
     await watcher.InspectLatestMatchForTrackedPlayersAsync();
@@ -79,6 +85,26 @@ static string? GetConfigPath(string[] args)
     }
 
     return null;
+}
+
+static string GetPostLatestForRiotId(string[] args)
+{
+    for (var index = 0; index < args.Length; index++)
+    {
+        if (!args[index].Equals("--post-latest-for", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[index + 1]))
+        {
+            throw new ArgumentException("--post-latest-for requires a Riot ID, for example: --post-latest-for \"GameName#TagLine\"");
+        }
+
+        return args[index + 1];
+    }
+
+    throw new ArgumentException("--post-latest-for requires a Riot ID, for example: --post-latest-for \"GameName#TagLine\"");
 }
 
 static IDisposable? RegisterSigTermHandler(CancellationTokenSource shutdown)

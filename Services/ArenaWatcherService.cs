@@ -37,6 +37,34 @@ public sealed class ArenaWatcherService(
         }
     }
 
+    public async Task PostLatestMatchForPlayerAsync(string riotId, CancellationToken cancellationToken = default)
+    {
+        var parts = riotId.Split('#', 2);
+        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+        {
+            Console.WriteLine($"Invalid Riot ID '{riotId}'. Expected format: GameName#TagLine.");
+            return;
+        }
+
+        var gameName = parts[0];
+        var tagLine = parts[1];
+
+        TrackedPlayer player;
+        try
+        {
+            var account = await riotClient.GetAccountByRiotIdAsync(gameName, tagLine, cancellationToken);
+            player = new TrackedPlayer(gameName, tagLine, account.Puuid);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Could not resolve {riotId}: {ex.Message}");
+            return;
+        }
+
+        Console.WriteLine($"Posting latest match for {player.DisplayName}.");
+        await PostLatestMatchAsync(player, cancellationToken, syncWinToArenaTracker: true);
+    }
+
     public async Task InspectLatestMatchForTrackedPlayersAsync(CancellationToken cancellationToken = default)
     {
         Console.WriteLine($"Inspecting latest match for {config.TrackedPlayers.Count} tracked player(s).");
@@ -156,7 +184,10 @@ public sealed class ArenaWatcherService(
         await seenMatchStore.SaveAsync();
     }
 
-    private async Task PostLatestMatchAsync(TrackedPlayer player, CancellationToken cancellationToken)
+    private async Task PostLatestMatchAsync(
+        TrackedPlayer player,
+        CancellationToken cancellationToken,
+        bool syncWinToArenaTracker = false)
     {
         var matchIds = await riotClient.GetRecentMatchIdsAsync(player.Puuid, count: 1, cancellationToken);
         var matchId = matchIds.FirstOrDefault();
@@ -194,6 +225,11 @@ public sealed class ArenaWatcherService(
         var card = await RenderCardAsync(summary, cancellationToken);
         await discordNotifier.PostArenaResultAsync(summary, card, cancellationToken);
         Console.WriteLine($"[{DateTimeOffset.Now:t}] Posted latest match for {player.DisplayName}: {matchId}");
+
+        if (syncWinToArenaTracker && ArenaMatchParser.IsArenaWin(participant.Value))
+        {
+            await SyncWinsToArenaTrackerAsync([summary], matchId, cancellationToken);
+        }
     }
 
     private async Task InspectLatestMatchAsync(TrackedPlayer player, CancellationToken cancellationToken)
