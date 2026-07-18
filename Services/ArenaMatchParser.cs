@@ -5,7 +5,7 @@ namespace DiscordBot.Services;
 
 public static class ArenaMatchParser
 {
-    private static readonly HashSet<int> ArenaQueueIds = [1700, 1710, 1750];
+    private static readonly HashSet<int> ArenaQueueIds = [1700, 1710, 1740, 1750];
     private static readonly HashSet<int> HiddenItemIds = [3348];
 
     public static bool IsArenaQueue(int queueId) => ArenaQueueIds.Contains(queueId);
