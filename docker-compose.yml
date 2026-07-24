@@ -1,0 +1,14 @@
+name: arena-watcher
+
+services:
+  arena-watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: arena-watcher
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./config/appsettings.json:/app/config/appsettings.json:ro
+      - ./data:/app/data

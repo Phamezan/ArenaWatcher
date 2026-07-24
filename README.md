@@ -59,8 +59,9 @@ real secrets out of `appsettings.json` entirely (see `DEPLOYMENT.md`).
 
 ## Deploying
 
-See [`DEPLOYMENT.md`](DEPLOYMENT.md) for running this as a long-lived
-`systemd` service on a VPS.
+- **Docker (Recommended)**: See [`deploy.md`](deploy.md) for running in a Docker container on Ubuntu Server.
+- **Systemd VPS**: See [`DEPLOYMENT.md`](DEPLOYMENT.md) for running as a direct `systemd` service on a Linux VPS.
+
 
 ## Notes
 
