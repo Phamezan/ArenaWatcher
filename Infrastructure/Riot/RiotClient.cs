@@ -31,6 +31,30 @@ public sealed class RiotClient(HttpClient httpClient, string apiKey, string regi
         return await GetJsonAsync<List<string>>(url, cancellationToken);
     }
 
+    public async Task<List<string>> GetMatchIdsAsync(
+        string puuid,
+        int queueId,
+        long startTimeSeconds,
+        CancellationToken cancellationToken)
+    {
+        var ids = new List<string>();
+        var start = 0;
+        while (true)
+        {
+            var url = $"https://{regionalRoute}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids?start={start}&count=100&queue={queueId}&startTime={startTimeSeconds}";
+            var page = await GetJsonAsync<List<string>>(url, cancellationToken);
+            ids.AddRange(page);
+            if (page.Count < 100)
+            {
+                break;
+            }
+
+            start += 100;
+        }
+
+        return ids;
+    }
+
     public async Task<JsonDocument> GetMatchAsync(string matchId, CancellationToken cancellationToken)
     {
         var url = $"https://{regionalRoute}.api.riotgames.com/lol/match/v5/matches/{matchId}";

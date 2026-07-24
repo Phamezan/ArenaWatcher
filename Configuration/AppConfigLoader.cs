@@ -33,12 +33,14 @@ public static class AppConfigLoader
             throw new InvalidOperationException("Set DiscordWebhookUrl in appsettings.json or DISCORD_WEBHOOK_URL.");
         }
 
-        if (config.TrackedPlayers is null || config.TrackedPlayers.Count == 0)
+        if ((config.TrackedPlayers is null || config.TrackedPlayers.Count == 0)
+            && string.IsNullOrWhiteSpace(config.RosterUrl))
         {
-            throw new InvalidOperationException("Add at least one player to TrackedPlayers.");
+            throw new InvalidOperationException("Add at least one player to TrackedPlayers, or set RosterUrl.");
         }
 
-        var duplicatePlayers = config.TrackedPlayers
+        var trackedPlayers = config.TrackedPlayers ?? [];
+        var duplicatePlayers = trackedPlayers
             .GroupBy(player => $"{player.GameName.Trim()}#{player.TagLine.Trim()}", StringComparer.OrdinalIgnoreCase)
             .Where(group => group.Count() > 1)
             .Select(group => group.Key)
@@ -49,7 +51,7 @@ public static class AppConfigLoader
             throw new InvalidOperationException($"Remove duplicate tracked player(s): {string.Join(", ", duplicatePlayers)}.");
         }
 
-        foreach (var player in config.TrackedPlayers)
+        foreach (var player in trackedPlayers)
         {
             if (string.IsNullOrWhiteSpace(player.GameName) || string.IsNullOrWhiteSpace(player.TagLine))
             {

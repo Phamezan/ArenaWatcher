@@ -5,4 +5,7 @@ public sealed class NullArenaTrackerNotifier : IArenaTrackerNotifier
 {
     public Task NotifyWinAsync(string summoner, string championName, CancellationToken cancellationToken) =>
         Task.CompletedTask;
+
+    public Task NotifySnapshotAsync(object snapshot, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }

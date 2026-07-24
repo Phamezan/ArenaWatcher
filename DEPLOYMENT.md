@@ -108,6 +108,15 @@ nano ~/arena-watcher/config/appsettings.json
 sudo systemctl restart arena-watcher
 ```
 
+If `RosterUrl` is set (recommended), the tracked-player list comes from the
+arena-tracker repo's `data/players.json` instead of `TrackedPlayers` — edit
+that file in the repo and restart the service. `RosterUrl` also drives the
+season sync: the watcher reads `data/season.json` (same base URL) at
+startup, and when the `seasonStart` changes it re-scans every player's
+matches since that date and pushes fresh season snapshots to the tracker,
+resetting the dashboard like the client does. Run it manually any time
+with `--backfill-season`.
+
 ## Useful Commands
 
 Stop:

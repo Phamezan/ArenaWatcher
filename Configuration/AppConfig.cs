@@ -8,4 +8,5 @@ public sealed record AppConfig(
     string SeenMatchesPath,
     List<PlayerConfig> TrackedPlayers,
     string? ArenaTrackerWebhookUrl = null,
-    string? ArenaTrackerSyncKey = null);
+    string? ArenaTrackerSyncKey = null,
+    string? RosterUrl = null);

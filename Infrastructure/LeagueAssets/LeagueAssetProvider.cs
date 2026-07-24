@@ -13,8 +13,40 @@ public sealed class LeagueAssetProvider(HttpClient httpClient) : ILeagueAssetPro
     private string? _dataDragonVersion;
     private Dictionary<int, ItemAsset>? _items;
     private Dictionary<string, string>? _championIconByName;
+    private IReadOnlyList<ChampionInfo>? _champions;
     private Dictionary<int, AugmentAsset>? _augments;
     private readonly HashSet<int> _loggedUnknownAugmentIds = [];
+
+    public async Task<IReadOnlyList<ChampionInfo>> GetChampionsAsync(CancellationToken cancellationToken)
+    {
+        if (_champions is not null)
+        {
+            return _champions;
+        }
+
+        var version = await GetDataDragonVersionAsync(cancellationToken);
+        using var document = await GetJsonDocumentAsync(
+            $"{DataDragonBaseUrl}/cdn/{version}/data/en_US/champion.json",
+            cancellationToken);
+
+        var champions = new List<ChampionInfo>();
+        if (document.RootElement.TryGetProperty("data", out var data)
+            && data.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var champion in data.EnumerateObject())
+            {
+                var key = ReadString(champion.Value, "key");
+                var name = ReadString(champion.Value, "name", champion.Name);
+                if (int.TryParse(key, out var id))
+                {
+                    champions.Add(new ChampionInfo(id, name));
+                }
+            }
+        }
+
+        _champions = champions.OrderBy(champion => champion.Name, StringComparer.Ordinal).ToArray();
+        return _champions;
+    }
 
     public async Task<MatchCardData> BuildCardDataAsync(MatchSummary summary, CancellationToken cancellationToken)
     {

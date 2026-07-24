@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 
 var config = AppConfigLoader.Load(GetConfigPath(args));
 using var httpClient = new HttpClient();
+config = await RosterClient.ApplyRosterAsync(httpClient, config);
 
 var riotClient = new RiotClient(httpClient, config.RiotApiKey, config.RegionalRoute);
 var discordClient = new DiscordWebhookClient(httpClient, config.DiscordWebhookUrl);
@@ -21,6 +22,22 @@ var leagueAssetProvider = new LeagueAssetProvider(httpClient);
 var matchCardRenderer = new MatchCardRenderer(httpClient);
 var seenMatchStore = await SeenMatchStore.LoadAsync(config.SeenMatchesPath);
 var watcher = new ArenaWatcherService(riotClient, discordClient, arenaTrackerNotifier, leagueAssetProvider, matchCardRenderer, seenMatchStore, config);
+var seasonBackfill = new SeasonBackfillService(riotClient, leagueAssetProvider, arenaTrackerNotifier, httpClient, config);
+
+if (args.Contains("--backfill-season", StringComparer.OrdinalIgnoreCase))
+{
+    await seasonBackfill.ForceBackfillAsync(CancellationToken.None);
+    return;
+}
+
+if (args.Contains("--calibrate-season", StringComparer.OrdinalIgnoreCase))
+{
+    var riotId = GetFlagValue(args, "--calibrate-season")
+        ?? throw new ArgumentException("--calibrate-season requires a Riot ID, e.g.: --calibrate-season \"GameName#TagLine\"");
+    var since = GetFlagValue(args, "--since") ?? "2026-01-01";
+    await seasonBackfill.CalibrateAsync(riotId, since, CancellationToken.None);
+    return;
+}
 
 if (args.Contains("--post-latest", StringComparer.OrdinalIgnoreCase))
 {
@@ -65,7 +82,23 @@ Console.CancelKeyPress += (_, eventArgs) =>
 
 using var sigTermRegistration = RegisterSigTermHandler(shutdown);
 
+await seasonBackfill.RunIfSeasonChangedAsync(shutdown.Token);
 await watcher.RunAsync(shutdown.Token);
+
+static string? GetFlagValue(string[] args, string flag)
+{
+    for (var index = 0; index < args.Length; index++)
+    {
+        if (args[index].Equals(flag, StringComparison.OrdinalIgnoreCase)
+            && index + 1 < args.Length
+            && !string.IsNullOrWhiteSpace(args[index + 1]))
+        {
+            return args[index + 1];
+        }
+    }
+
+    return null;
+}
 
 static string? GetConfigPath(string[] args)
 {

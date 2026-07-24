@@ -14,11 +14,21 @@ public sealed class ArenaTrackerSyncClient(HttpClient httpClient, string webhook
 {
     public async Task NotifyWinAsync(string summoner, string championName, CancellationToken cancellationToken)
     {
-        var payload = JsonSerializer.Serialize(new { summoner, championName }, JsonOptions.Default);
+        await PostAsync(new { summoner, championName }, cancellationToken);
+    }
+
+    public async Task NotifySnapshotAsync(object snapshot, CancellationToken cancellationToken)
+    {
+        await PostAsync(snapshot, cancellationToken);
+    }
+
+    private async Task PostAsync(object payload, CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(payload, JsonOptions.Default);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, webhookUrl)
         {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
         request.Headers.Add("X-Sync-Key", syncKey);
 
