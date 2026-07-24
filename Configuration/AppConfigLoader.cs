@@ -22,6 +22,7 @@ public static class AppConfigLoader
         var discordWebhookUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL") ?? config.DiscordWebhookUrl;
         var arenaTrackerWebhookUrl = Environment.GetEnvironmentVariable("ARENA_TRACKER_WEBHOOK_URL") ?? config.ArenaTrackerWebhookUrl;
         var arenaTrackerSyncKey = Environment.GetEnvironmentVariable("ARENA_TRACKER_SYNC_KEY") ?? config.ArenaTrackerSyncKey;
+        var rosterUrl = Environment.GetEnvironmentVariable("ROSTER_URL") ?? config.RosterUrl;
 
         if (string.IsNullOrWhiteSpace(riotApiKey) || riotApiKey.Contains("replace-me", StringComparison.OrdinalIgnoreCase))
         {
@@ -34,7 +35,7 @@ public static class AppConfigLoader
         }
 
         if ((config.TrackedPlayers is null || config.TrackedPlayers.Count == 0)
-            && string.IsNullOrWhiteSpace(config.RosterUrl))
+            && string.IsNullOrWhiteSpace(rosterUrl))
         {
             throw new InvalidOperationException("Add at least one player to TrackedPlayers, or set RosterUrl.");
         }
@@ -65,7 +66,8 @@ public static class AppConfigLoader
             DiscordWebhookUrl = discordWebhookUrl,
             PollIntervalSeconds = Math.Max(config.PollIntervalSeconds, 60),
             ArenaTrackerWebhookUrl = arenaTrackerWebhookUrl,
-            ArenaTrackerSyncKey = arenaTrackerSyncKey
+            ArenaTrackerSyncKey = arenaTrackerSyncKey,
+            RosterUrl = rosterUrl
         };
     }
 }

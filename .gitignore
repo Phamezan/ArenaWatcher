@@ -2,6 +2,8 @@ bin/
 obj/
 data/
 publish/
+config/
+.env
 appsettings.json
 appsettings.test.json
 *.user

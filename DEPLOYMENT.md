@@ -1,6 +1,71 @@
 # VPS Deployment
 
-This project runs as a long-lived `systemd` service on a Linux VPS, built
+Two supported ways to run: **Docker** (below) or **systemd** (further down).
+Docker is the simpler of the two.
+
+## Docker
+
+Layout on the host, next to the git checkout:
+
+```
+<checkout>/Dockerfile, docker-compose.yml
+<checkout>/config/appsettings.json   mounted read-only into the container
+<checkout>/data/                     state volume (seen-matches.json + season state)
+<checkout>/.env                      secrets (gitignored)
+```
+
+`.env` contents:
+
+```bash
+RIOT_API_KEY=RGAPI-your-personal-key
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# Syncs Arena wins + season snapshots to the arena-tracker dashboard.
+# Omit both to skip dashboard sync — Discord posting still works.
+ARENA_TRACKER_WEBHOOK_URL=https://arena-tracker-sync.<you>.workers.dev
+ARENA_TRACKER_SYNC_KEY=<same SYNC_KEY set on the Worker>
+
+# Single source of truth for the tracked-player roster; also drives the
+# season sync (the watcher reads data/season.json from the same base URL).
+ROSTER_URL=https://raw.githubusercontent.com/<owner>/<repo>/main/data/players.json
+```
+
+`config/appsettings.json` only needs non-secret settings; important one:
+
+```json
+{
+  "SeenMatchesPath": "/app/data/seen-matches.json"
+}
+```
+
+`SeenMatchesPath` must live under `/app/data` (the mounted volume) — the
+season-backfill state file is written next to it, so both survive container
+rebuilds. `TrackedPlayers` can be left empty when `ROSTER_URL` is set; it
+stays as the offline fallback.
+
+Run:
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
+
+One-off commands against the container:
+
+```bash
+docker compose run --rm arena-watcher --backfill-season
+docker compose run --rm arena-watcher --calibrate-season "Name#Tag" --since 2026-01-01
+```
+
+Redeploy after `git pull`: `docker compose up -d --build`.
+
+Note: `ROSTER_URL` reads from the arena-tracker repo's default branch, so
+roster/season changes only reach the container after they're pushed there
+(restart the container to pick them up).
+
+## systemd
+
+This project can also run as a long-lived `systemd` service on a Linux VPS, built
 directly from a git checkout on the box — no local publish/rsync step.
 Runs as your regular login user under `~/arena-watcher` (no dedicated
 service user, no root needed — the bot only makes outbound HTTP calls).
