@@ -11,7 +11,7 @@ On your Ubuntu server, clone the repository directly. Configuration, runtime dat
 ```
 ~/arena-watcher/               # Project root (git checkout)
 ├── config/
-│   └── appsettings.json       # Configured with TrackedPlayers, RosterUrl, etc.
+│   └── appsettings.json       # App config (RosterUrl or TrackedPlayers, route, path)
 ├── data/
 │   ├── seen-matches.json      # De-duplication match cache (persisted)
 │   └── seen-matches.json.season # Season backfill state marker
@@ -67,14 +67,28 @@ cp appsettings.example.json config/appsettings.json
 nano config/appsettings.json
 ```
 
-Ensure `SeenMatchesPath` points to `/app/data/seen-matches.json` (the in-container path):
+Ensure `SeenMatchesPath` points to `/app/data/seen-matches.json` (the in-container path).
+
+#### Option A: Using `RosterUrl` (Shared player list from GitHub)
+If using `RosterUrl`, the bot dynamically fetches player names from your repository (`players.json`), so `TrackedPlayers`, `RiotApiKey`, and `DiscordWebhookUrl` do not need to be in `appsettings.json`:
 
 ```json
 {
   "RegionalRoute": "europe",
   "PollIntervalSeconds": 60,
   "SeenMatchesPath": "/app/data/seen-matches.json",
-  "RosterUrl": "https://raw.githubusercontent.com/<owner>/<repo>/main/data/players.json",
+  "RosterUrl": "https://raw.githubusercontent.com/<owner>/<repo>/main/data/players.json"
+}
+```
+
+#### Option B: Manual `TrackedPlayers` List
+If you are not using a shared `RosterUrl`, define your tracked players directly in `TrackedPlayers`:
+
+```json
+{
+  "RegionalRoute": "europe",
+  "PollIntervalSeconds": 60,
+  "SeenMatchesPath": "/app/data/seen-matches.json",
   "TrackedPlayers": [
     {
       "GameName": "Phamezan",
@@ -84,7 +98,7 @@ Ensure `SeenMatchesPath` points to `/app/data/seen-matches.json` (the in-contain
 }
 ```
 
-> **Note:** `RiotApiKey` and `DiscordWebhookUrl` can be set to `null` or left as placeholder strings in `appsettings.json` because environment variables defined in `.env` automatically take priority.
+> **Note:** API secrets (`RIOT_API_KEY`, `DISCORD_WEBHOOK_URL`, `ARENA_TRACKER_WEBHOOK_URL`, `ARENA_TRACKER_SYNC_KEY`) are managed cleanly via `.env` and do not need to be in `appsettings.json`.
 
 ---
 
