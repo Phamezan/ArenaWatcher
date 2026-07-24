@@ -13,8 +13,7 @@ On your Ubuntu server, clone the repository directly. Configuration, runtime dat
 ├── config/
 │   └── appsettings.json       # App config (RosterUrl or TrackedPlayers, route, path)
 ├── data/
-│   ├── seen-matches.json      # De-duplication match cache (persisted)
-│   └── seen-matches.json.season # Season backfill state marker
+│   └── seen-matches.json      # De-duplication match cache (auto-created on startup)
 ├── .env                       # Active environment secrets (copied from deployment/arena-watcher.env.example)
 ├── docker-compose.yml         # Container orchestration specification
 └── Dockerfile                 # Multi-stage .NET 8 build with ImageSharp font support
@@ -102,29 +101,15 @@ If you are not using a shared `RosterUrl`, define your tracked players directly 
 
 ---
 
-## 3. Migrating State from VPS to Docker
-
-If you are moving from an existing VPS installation to Docker:
-
-1. **Stop the existing VPS service**:
-   ```bash
-   sudo systemctl stop arena-watcher
-   ```
-2. **Copy persistent match data** into the local `./data` folder on your Ubuntu server:
-   ```bash
-   scp user@old-vps:~/arena-watcher/data/seen-matches.json ~/arena-watcher/data/seen-matches.json
-   ```
-   *(If present, also copy `seen-matches.json.season` to preserve season backfill history).*
-
----
-
-## 4. Running the Bot
+## 3. Running the Bot
 
 ### Start the Service
 
 ```bash
 docker compose up -d --build
 ```
+
+> **Automatic Match Priming:** On startup, the bot automatically runs `PrimeSeenMatchesAsync`, fetching the 20 most recent match IDs for all tracked players and marking them as seen. You do not need to copy any old state files when deploying to a new server; old matches will never be re-posted to Discord.
 
 ### View Live Logs
 
@@ -146,7 +131,7 @@ docker compose restart
 
 ---
 
-## 5. Running Manual Commands & CLI Flags
+## 4. Running Manual Commands & CLI Flags
 
 You can run any of the application's CLI subcommands using temporary containers attached to the same `.env` and persistent `./data` volume:
 
@@ -187,7 +172,7 @@ You can run any of the application's CLI subcommands using temporary containers 
 
 ---
 
-## 6. Updating & Maintenance
+## 5. Updating & Maintenance
 
 To update ArenaWatcher when new code is pushed:
 
