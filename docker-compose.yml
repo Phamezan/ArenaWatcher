@@ -7,6 +7,11 @@ services:
       dockerfile: Dockerfile
     container_name: arena-watcher
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - .env
     volumes:
