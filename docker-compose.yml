@@ -7,6 +7,9 @@ services:
       dockerfile: Dockerfile
     container_name: arena-watcher
     restart: unless-stopped
+    labels:
+      - "com.dozzle.enable=true"
+      - "com.dozzle.group=Bots"
     logging:
       driver: "json-file"
       options:
