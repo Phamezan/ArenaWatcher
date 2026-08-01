@@ -30,6 +30,11 @@ public sealed class SeasonBackfillService(
     // Dev-key budget is 100 requests / 2 min; pace match fetches under it.
     private static readonly TimeSpan MatchFetchDelay = TimeSpan.FromMilliseconds(1300);
 
+    /// <summary>
+    /// Backfills every tracked player that has no season-scoped snapshot yet:
+    /// on a season rollover that is everyone, otherwise only players added to
+    /// the roster since the last run.
+    /// </summary>
     public async Task RunIfSeasonChangedAsync(CancellationToken cancellationToken)
     {
         var seasonStart = await FetchSeasonStartAsync(cancellationToken);
@@ -38,41 +43,66 @@ public sealed class SeasonBackfillService(
             return;
         }
 
-        var statePath = SeasonStatePath();
-        var lastProcessed = File.Exists(statePath)
-            ? (await File.ReadAllTextAsync(statePath, cancellationToken)).Trim()
-            : null;
+        var state = await ReadSeasonStateAsync(cancellationToken);
+        var isSameSeason = state?.SeasonStart == seasonStart;
+        var alreadyBackfilled = isSameSeason
+            ? new HashSet<string>(state!.BackfilledPlayers, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        if (lastProcessed == seasonStart)
+        var pending = config.TrackedPlayers
+            .Where(player => !alreadyBackfilled.Contains(RiotIdOf(player)))
+            .ToList();
+
+        if (pending.Count == 0)
         {
-            Console.WriteLine($"Season backfill already done for season start {seasonStart}.");
+            Console.WriteLine($"Season backfill already done for season start {seasonStart} ({alreadyBackfilled.Count} player(s)).");
             return;
         }
 
-        Console.WriteLine($"New Arena season detected (start {seasonStart}, was {lastProcessed ?? "none"}). Running full season backfill...");
-        await BackfillAllPlayersAsync(seasonStart, cancellationToken);
-        await File.WriteAllTextAsync(statePath, seasonStart, cancellationToken);
+        Console.WriteLine(isSameSeason
+            ? $"Season backfill pending for {pending.Count} new player(s): {string.Join(", ", pending.Select(RiotIdOf))}"
+            : $"New Arena season detected (start {seasonStart}, was {state?.SeasonStart ?? "none"}). Running full season backfill...");
+
+        await BackfillPlayersAsync(pending, seasonStart, alreadyBackfilled, cancellationToken);
     }
 
     public async Task ForceBackfillAsync(CancellationToken cancellationToken)
     {
         var seasonStart = await FetchSeasonStartAsync(cancellationToken)
             ?? throw new InvalidOperationException("No season config found (data/season.json via RosterUrl).");
-        await BackfillAllPlayersAsync(seasonStart, cancellationToken);
-        await File.WriteAllTextAsync(SeasonStatePath(), seasonStart, cancellationToken);
+        await BackfillPlayersAsync(
+            config.TrackedPlayers,
+            seasonStart,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            cancellationToken);
     }
 
-    private async Task BackfillAllPlayersAsync(string seasonStart, CancellationToken cancellationToken)
+    /// <summary>
+    /// Backfills the given players and persists state after each success, so a
+    /// restart mid-run resumes instead of re-scanning finished players.
+    /// </summary>
+    private async Task BackfillPlayersAsync(
+        IReadOnlyList<PlayerConfig> players,
+        string seasonStart,
+        HashSet<string> alreadyBackfilled,
+        CancellationToken cancellationToken)
     {
         var startSeconds = new DateTimeOffset(DateOnly.Parse(seasonStart), TimeOnly.MinValue, TimeSpan.Zero)
             .ToUnixTimeSeconds();
         var champions = await leagueAssetProvider.GetChampionsAsync(cancellationToken);
 
-        foreach (var player in config.TrackedPlayers)
+        // Season identity is written up front so a crash before the first
+        // player completes still records which season the (empty) set is for.
+        var completed = new HashSet<string>(alreadyBackfilled, StringComparer.OrdinalIgnoreCase);
+        await WriteSeasonStateAsync(seasonStart, completed, cancellationToken);
+
+        foreach (var player in players)
         {
             try
             {
                 await BackfillPlayerAsync(player, startSeconds, seasonStart, champions, cancellationToken);
+                completed.Add(RiotIdOf(player));
+                await WriteSeasonStateAsync(seasonStart, completed, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -245,4 +275,64 @@ public sealed class SeasonBackfillService(
     }
 
     private string SeasonStatePath() => config.SeenMatchesPath + ".season";
+
+    private static string RiotIdOf(PlayerConfig player) => $"{player.GameName}#{player.TagLine}";
+
+    /// <summary>
+    /// State file holds the season start plus the Riot IDs already backfilled
+    /// for it. Files written before per-player tracking existed contain a bare
+    /// date; those are read as "no player backfilled yet" so the next startup
+    /// rebuilds every snapshot once.
+    /// </summary>
+    private sealed record SeasonState(string SeasonStart, IReadOnlyList<string> BackfilledPlayers);
+
+    private async Task<SeasonState?> ReadSeasonStateAsync(CancellationToken cancellationToken)
+    {
+        var statePath = SeasonStatePath();
+        if (!File.Exists(statePath))
+        {
+            return null;
+        }
+
+        var content = (await File.ReadAllTextAsync(statePath, cancellationToken)).Trim();
+        if (content.Length == 0)
+        {
+            return null;
+        }
+
+        if (!content.StartsWith('{'))
+        {
+            Console.WriteLine($"Legacy season state found (season {content}, no per-player record); re-running backfill for all players.");
+            return new SeasonState(content, []);
+        }
+
+        try
+        {
+            var state = JsonSerializer.Deserialize<SeasonState>(content, SeasonStateJsonOptions);
+            return state?.SeasonStart is null ? null : state with { BackfilledPlayers = state.BackfilledPlayers ?? [] };
+        }
+        catch (JsonException ex)
+        {
+            Console.WriteLine($"Could not read season state ({ex.Message}); treating as unprocessed.");
+            return null;
+        }
+    }
+
+    private async Task WriteSeasonStateAsync(
+        string seasonStart,
+        IEnumerable<string> backfilledPlayers,
+        CancellationToken cancellationToken)
+    {
+        var state = new SeasonState(seasonStart, backfilledPlayers.OrderBy(id => id, StringComparer.Ordinal).ToArray());
+        await File.WriteAllTextAsync(
+            SeasonStatePath(),
+            JsonSerializer.Serialize(state, SeasonStateJsonOptions),
+            cancellationToken);
+    }
+
+    private static readonly JsonSerializerOptions SeasonStateJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+    };
 }
