@@ -29,6 +29,19 @@ public static class AppConfigLoader
             throw new InvalidOperationException("Set RiotApiKey in appsettings.json or RIOT_API_KEY.");
         }
 
+        if (string.IsNullOrWhiteSpace(config.RegionalRoute))
+        {
+            throw new InvalidOperationException("Set RegionalRoute in appsettings.json (e.g. \"europe\"). Riot API URLs are built from it.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(arenaTrackerWebhookUrl)
+            && (!Uri.TryCreate(arenaTrackerWebhookUrl, UriKind.Absolute, out var trackerUri)
+                || trackerUri.Scheme is not ("http" or "https")))
+        {
+            throw new InvalidOperationException(
+                $"ARENA_TRACKER_WEBHOOK_URL must be a full URL including https:// (got '{arenaTrackerWebhookUrl}').");
+        }
+
         if (string.IsNullOrWhiteSpace(discordWebhookUrl) || discordWebhookUrl.Contains("replace-me", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Set DiscordWebhookUrl in appsettings.json or DISCORD_WEBHOOK_URL.");
