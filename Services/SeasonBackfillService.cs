@@ -19,6 +19,12 @@ namespace DiscordBot.Services;
 ///
 /// Win condition mirrors the client's counter: participant.subteamPlacement == 1.
 /// See arena-tracker/SPEC.md for how this was validated.
+///
+/// Each completed scan stores a per-player watermark and the accumulated
+/// win set, so later --backfill-season runs only re-scan matches since the
+/// last scan and merge the results into the stored set (snapshots are full
+/// overwrites, so the stored set must be included). --backfill-season
+/// --full ignores the watermarks and rebuilds from the season start.
 /// </summary>
 public sealed class SeasonBackfillService(
     IRiotClient riotClient,
@@ -29,6 +35,10 @@ public sealed class SeasonBackfillService(
 {
     // Dev-key budget is 100 requests / 2 min; pace match fetches under it.
     private static readonly TimeSpan MatchFetchDelay = TimeSpan.FromMilliseconds(1300);
+
+    // Incremental scans re-fetch a window before the last watermark so matches
+    // that were still in progress (or unindexed) at scan time are not missed.
+    private const long ScanOverlapSeconds = 3 * 60 * 60;
 
     /// <summary>
     /// Backfills every tracked player that has no season-scoped snapshot yet:
@@ -45,17 +55,17 @@ public sealed class SeasonBackfillService(
 
         var state = await ReadSeasonStateAsync(cancellationToken);
         var isSameSeason = state?.SeasonStart == seasonStart;
-        var alreadyBackfilled = isSameSeason
-            ? new HashSet<string>(state!.BackfilledPlayers, StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var records = isSameSeason
+            ? state!.Players.ToDictionary(player => player.RiotId, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, PlayerBackfillState>(StringComparer.OrdinalIgnoreCase);
 
         var pending = config.TrackedPlayers
-            .Where(player => !alreadyBackfilled.Contains(RiotIdOf(player)))
+            .Where(player => !records.ContainsKey(RiotIdOf(player)))
             .ToList();
 
         if (pending.Count == 0)
         {
-            Console.WriteLine($"Season backfill already done for season start {seasonStart} ({alreadyBackfilled.Count} player(s)).");
+            Console.WriteLine($"Season backfill already done for season start {seasonStart} ({records.Count} player(s)).");
             return;
         }
 
@@ -63,18 +73,26 @@ public sealed class SeasonBackfillService(
             ? $"Season backfill pending for {pending.Count} new player(s): {string.Join(", ", pending.Select(RiotIdOf))}"
             : $"New Arena season detected (start {seasonStart}, was {state?.SeasonStart ?? "none"}). Running full season backfill...");
 
-        await BackfillPlayersAsync(pending, seasonStart, alreadyBackfilled, cancellationToken);
+        await BackfillPlayersAsync(pending, seasonStart, records, forceFullScan: true, cancellationToken);
     }
 
-    public async Task ForceBackfillAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Re-scans every tracked player and pushes fresh snapshots. Incremental by
+    /// default: players with a previous scan record are only scanned from that
+    /// watermark and their stored win set is merged in. Pass fullScan to ignore
+    /// the watermarks and rebuild from the season start.
+    /// </summary>
+    public async Task ForceBackfillAsync(bool fullScan, CancellationToken cancellationToken)
     {
         var seasonStart = await FetchSeasonStartAsync(cancellationToken)
             ?? throw new InvalidOperationException("No season config found (data/season.json via RosterUrl).");
-        await BackfillPlayersAsync(
-            config.TrackedPlayers,
-            seasonStart,
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            cancellationToken);
+
+        var state = await ReadSeasonStateAsync(cancellationToken);
+        var records = !fullScan && state?.SeasonStart == seasonStart
+            ? state!.Players.ToDictionary(player => player.RiotId, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, PlayerBackfillState>(StringComparer.OrdinalIgnoreCase);
+
+        await BackfillPlayersAsync(config.TrackedPlayers, seasonStart, records, fullScan, cancellationToken);
     }
 
     /// <summary>
@@ -84,25 +102,31 @@ public sealed class SeasonBackfillService(
     private async Task BackfillPlayersAsync(
         IReadOnlyList<PlayerConfig> players,
         string seasonStart,
-        HashSet<string> alreadyBackfilled,
+        Dictionary<string, PlayerBackfillState> records,
+        bool forceFullScan,
         CancellationToken cancellationToken)
     {
-        var startSeconds = new DateTimeOffset(DateOnly.Parse(seasonStart), TimeOnly.MinValue, TimeSpan.Zero)
+        var seasonStartSeconds = new DateTimeOffset(DateOnly.Parse(seasonStart), TimeOnly.MinValue, TimeSpan.Zero)
             .ToUnixTimeSeconds();
         var champions = await leagueAssetProvider.GetChampionsAsync(cancellationToken);
 
         // Season identity is written up front so a crash before the first
-        // player completes still records which season the (empty) set is for.
-        var completed = new HashSet<string>(alreadyBackfilled, StringComparer.OrdinalIgnoreCase);
-        await WriteSeasonStateAsync(seasonStart, completed, cancellationToken);
+        // player completes still records which season the set is for.
+        await WriteSeasonStateAsync(seasonStart, records.Values, cancellationToken);
 
         foreach (var player in players)
         {
             try
             {
-                await BackfillPlayerAsync(player, startSeconds, seasonStart, champions, cancellationToken);
-                completed.Add(RiotIdOf(player));
-                await WriteSeasonStateAsync(seasonStart, completed, cancellationToken);
+                records[RiotIdOf(player)] = await BackfillPlayerAsync(
+                    player,
+                    seasonStartSeconds,
+                    seasonStart,
+                    records.GetValueOrDefault(RiotIdOf(player)),
+                    forceFullScan,
+                    champions,
+                    cancellationToken);
+                await WriteSeasonStateAsync(seasonStart, records.Values, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -111,15 +135,24 @@ public sealed class SeasonBackfillService(
         }
     }
 
-    private async Task BackfillPlayerAsync(
+    private async Task<PlayerBackfillState> BackfillPlayerAsync(
         PlayerConfig player,
-        long startSeconds,
+        long seasonStartSeconds,
         string seasonStart,
+        PlayerBackfillState? prior,
+        bool forceFullScan,
         IReadOnlyList<ChampionInfo> champions,
         CancellationToken cancellationToken)
     {
         var riotId = $"{player.GameName}#{player.TagLine}";
         var account = await riotClient.GetAccountByRiotIdAsync(player.GameName, player.TagLine, cancellationToken);
+
+        // The watermark is captured before the scan; the overlap guards against
+        // matches that were still in progress (or not yet indexed) at that moment.
+        var scanStartedSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var startSeconds = forceFullScan || prior is null
+            ? seasonStartSeconds
+            : Math.Max(seasonStartSeconds, prior.LastScanSeconds - ScanOverlapSeconds);
 
         var matchIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var queueId in ArenaMatchParser.ArenaQueueIds)
@@ -127,9 +160,10 @@ public sealed class SeasonBackfillService(
             matchIds.UnionWith(await riotClient.GetMatchIdsAsync(account.Puuid, queueId, startSeconds, cancellationToken));
         }
 
-        Console.WriteLine($"[{DateTimeOffset.Now:t}] {riotId}: {matchIds.Count} Arena matches since {seasonStart}. Scanning...");
-
-        var wonChampionIds = new HashSet<int>();
+        var wonChampionIds = new HashSet<int>(forceFullScan ? [] : prior?.WonChampionIds ?? []);
+        Console.WriteLine(forceFullScan || prior is null
+            ? $"[{DateTimeOffset.Now:t}] {riotId}: {matchIds.Count} Arena matches since {seasonStart}. Scanning..."
+            : $"[{DateTimeOffset.Now:t}] {riotId}: {matchIds.Count} Arena matches since last scan. Scanning...");
         var scanned = 0;
         foreach (var matchId in matchIds)
         {
@@ -167,6 +201,8 @@ public sealed class SeasonBackfillService(
 
         await arenaTrackerNotifier.NotifySnapshotAsync(snapshot, cancellationToken);
         Console.WriteLine($"[{DateTimeOffset.Now:t}] {riotId}: {wonChampionIds.Count} champions won this season, snapshot synced.");
+
+        return new PlayerBackfillState(riotId, scanStartedSeconds, wonChampionIds.OrderBy(id => id).ToArray());
     }
 
     /// <summary>
@@ -279,12 +315,17 @@ public sealed class SeasonBackfillService(
     private static string RiotIdOf(PlayerConfig player) => $"{player.GameName}#{player.TagLine}";
 
     /// <summary>
-    /// State file holds the season start plus the Riot IDs already backfilled
-    /// for it. Files written before per-player tracking existed contain a bare
-    /// date; those are read as "no player backfilled yet" so the next startup
-    /// rebuilds every snapshot once.
+    /// State file holds the season start plus, per player, the last scan
+    /// watermark and the champions already won this season. The win set is
+    /// stored because snapshots overwrite the player's arena-tracker data —
+    /// incremental scans must merge with it rather than replace it. Older
+    /// formats (a bare date, or a Riot ID list without win data) are read as
+    /// "no player records yet" so the next startup rebuilds every snapshot
+    /// once and populates the new records.
     /// </summary>
-    private sealed record SeasonState(string SeasonStart, IReadOnlyList<string> BackfilledPlayers);
+    private sealed record SeasonState(string SeasonStart, IReadOnlyList<PlayerBackfillState> Players);
+
+    private sealed record PlayerBackfillState(string RiotId, long LastScanSeconds, IReadOnlyList<int> WonChampionIds);
 
     private async Task<SeasonState?> ReadSeasonStateAsync(CancellationToken cancellationToken)
     {
@@ -309,7 +350,7 @@ public sealed class SeasonBackfillService(
         try
         {
             var state = JsonSerializer.Deserialize<SeasonState>(content, SeasonStateJsonOptions);
-            return state?.SeasonStart is null ? null : state with { BackfilledPlayers = state.BackfilledPlayers ?? [] };
+            return state?.SeasonStart is null ? null : state with { Players = state.Players ?? [] };
         }
         catch (JsonException ex)
         {
@@ -320,10 +361,12 @@ public sealed class SeasonBackfillService(
 
     private async Task WriteSeasonStateAsync(
         string seasonStart,
-        IEnumerable<string> backfilledPlayers,
+        IEnumerable<PlayerBackfillState> players,
         CancellationToken cancellationToken)
     {
-        var state = new SeasonState(seasonStart, backfilledPlayers.OrderBy(id => id, StringComparer.Ordinal).ToArray());
+        var state = new SeasonState(
+            seasonStart,
+            players.OrderBy(player => player.RiotId, StringComparer.OrdinalIgnoreCase).ToArray());
         await File.WriteAllTextAsync(
             SeasonStatePath(),
             JsonSerializer.Serialize(state, SeasonStateJsonOptions),

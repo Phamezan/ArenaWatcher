@@ -26,7 +26,7 @@ var seasonBackfill = new SeasonBackfillService(riotClient, leagueAssetProvider, 
 
 if (args.Contains("--backfill-season", StringComparer.OrdinalIgnoreCase))
 {
-    await seasonBackfill.ForceBackfillAsync(CancellationToken.None);
+    await seasonBackfill.ForceBackfillAsync(args.Contains("--full", StringComparer.OrdinalIgnoreCase), CancellationToken.None);
     return;
 }
 

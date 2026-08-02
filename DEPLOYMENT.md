@@ -120,7 +120,10 @@ season sync: the watcher reads `data/season.json` (same base URL) at
 startup, and when the `seasonStart` changes it re-scans every player's
 matches since that date and pushes fresh season snapshots to the tracker,
 resetting the dashboard like the client does. Run it manually any time
-with `--backfill-season`.
+with `--backfill-season` — each run only scans matches since the previous
+run's watermark and merges them into the stored win set, so recovery after
+downtime is cheap. Add `--full` to ignore the watermarks and re-scan the
+whole season.
 
 ## Useful Commands
 

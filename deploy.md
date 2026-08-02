@@ -155,9 +155,14 @@ You can run any of the application's CLI subcommands using temporary containers 
   docker compose run --rm arena-watcher --post-latest-group-test
   ```
 
-- **Force full season backfill sync to arena-tracker:**
+- **Force season backfill sync to arena-tracker (incremental — only matches since the last scan):**
   ```bash
   docker compose run --rm arena-watcher --backfill-season
+  ```
+
+- **Force full season backfill (re-scan every match since season start):**
+  ```bash
+  docker compose run --rm arena-watcher --backfill-season --full
   ```
 
 - **Calibrate season start date against Riot API:**
