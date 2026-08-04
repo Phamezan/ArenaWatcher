@@ -9,4 +9,5 @@ public sealed record AppConfig(
     List<PlayerConfig> TrackedPlayers,
     string? ArenaTrackerWebhookUrl = null,
     string? ArenaTrackerSyncKey = null,
-    string? RosterUrl = null);
+    string? RosterUrl = null,
+    List<string>? DiscordPostAllowlist = null);

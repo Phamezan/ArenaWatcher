@@ -423,20 +423,40 @@ public sealed class ArenaWatcherService(
 
         await SyncWinsToArenaTrackerAsync(winEvents, matchId, cancellationToken);
 
-        if (winners.Length == 1)
+        // Discord posts are gated on the allowlist (matched on game name,
+        // case-insensitive); arena-tracker sync above stays for everyone.
+        var discordWinners = winners.Where(w => IsDiscordPostAllowed(w.PlayerName)).ToArray();
+        if (discordWinners.Length == 0)
         {
-            var card = await RenderCardAsync(winners[0], cancellationToken);
-            await discordNotifier.PostArenaResultAsync(winners[0], card, cancellationToken);
-            Console.WriteLine($"[{DateTimeOffset.Now:t}] Posted Arena win for {winners[0].PlayerName}: {matchId}");
+            Console.WriteLine($"[{DateTimeOffset.Now:t}] Skipped Discord post for {matchId}, no allowlisted winners.");
+        }
+        else if (discordWinners.Length == 1)
+        {
+            var card = await RenderCardAsync(discordWinners[0], cancellationToken);
+            await discordNotifier.PostArenaResultAsync(discordWinners[0], card, cancellationToken);
+            Console.WriteLine($"[{DateTimeOffset.Now:t}] Posted Arena win for {discordWinners[0].PlayerName}: {matchId}");
         }
         else
         {
-            var card = await RenderGroupCardAsync(winners, cancellationToken);
-            await discordNotifier.PostArenaResultAsync(winners[0], card, cancellationToken);
-            Console.WriteLine($"[{DateTimeOffset.Now:t}] Posted grouped Arena win for {winners.Length} tracked players: {matchId}");
+            var card = await RenderGroupCardAsync(discordWinners, cancellationToken);
+            await discordNotifier.PostArenaResultAsync(discordWinners[0], card, cancellationToken);
+            Console.WriteLine($"[{DateTimeOffset.Now:t}] Posted grouped Arena win for {discordWinners.Length} tracked players: {matchId}");
         }
 
         MarkSeenForParticipants(trackedParticipants, matchId);
+    }
+
+    /// <summary>
+    /// Empty/unset allowlist means "post everyone" (backwards compatible).
+    /// Entries match the game-name part of a Riot ID, case-insensitively.
+    /// </summary>
+    private bool IsDiscordPostAllowed(string playerName)
+    {
+        var allowlist = config.DiscordPostAllowlist;
+        if (allowlist is null || allowlist.Count == 0) return true;
+
+        var gameName = playerName.Split('#')[0].Trim();
+        return allowlist.Any(entry => string.Equals(entry.Trim(), gameName, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task SyncWinsToArenaTrackerAsync(
