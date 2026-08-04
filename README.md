@@ -54,7 +54,7 @@ dotnet run -- --render-layout-test       # render a sample card to disk without 
 | `TrackedPlayers` | List of `{ GameName, TagLine }` to watch. |
 | `ArenaTrackerWebhookUrl` / `ArenaTrackerSyncKey` | Optional — syncs wins to an [arena-tracker](https://github.com/Phamezan/arena-tracker) dashboard. Also settable via `ARENA_TRACKER_WEBHOOK_URL` / `ARENA_TRACKER_SYNC_KEY` env vars. Leave unset to skip; Discord posting works either way. |
 | `DiscordPostAllowlist` | Optional — game names (case-insensitive) whose wins get posted to Discord. Empty/unset posts everyone. Arena-tracker sync is unaffected. |
-| `WebUiPort` / `WebUiToken` | Optional — serves a small admin page on that port for editing `appsettings.json` from a browser (token required via `?token=`). Saving writes the file and restarts the process so compose re-launches it with the new config. Also settable via `WEBUI_PORT` / `WEBUI_TOKEN` env vars. The page displays secrets — only bind the port to a trusted network. `--admin-ui-only` runs just this page without the watcher loop. |
+| `WebUiPort` / `WebUiToken` | Optional — serves a small admin page on that port for toggling which tracked players get Discord win posts (checkboxes, saved to `DiscordPostAllowlist`). Saving writes `appsettings.json` and restarts the process so compose re-launches it. The page shows no secrets; `WebUiToken` is optional (`?token=` / `X-Admin-Token`) for extra safety on shared networks. Also settable via `WEBUI_PORT` / `WEBUI_TOKEN` env vars. `--admin-ui-only` runs just this page without the watcher loop. |
 
 Any field can instead be set via environment variable — useful for keeping
 real secrets out of `appsettings.json` entirely (see `DEPLOYMENT.md`).
