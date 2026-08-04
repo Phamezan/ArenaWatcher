@@ -10,4 +10,6 @@ public sealed record AppConfig(
     string? ArenaTrackerWebhookUrl = null,
     string? ArenaTrackerSyncKey = null,
     string? RosterUrl = null,
-    List<string>? DiscordPostAllowlist = null);
+    List<string>? DiscordPostAllowlist = null,
+    int? WebUiPort = null,
+    string? WebUiToken = null);

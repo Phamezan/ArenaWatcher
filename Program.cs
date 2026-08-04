@@ -8,7 +8,10 @@ using DiscordBot.Rendering;
 using DiscordBot.Services;
 using System.Runtime.InteropServices;
 
-var config = AppConfigLoader.Load(GetConfigPath(args));
+var configPath = GetConfigPath(args)
+    ?? Environment.GetEnvironmentVariable("ARENA_BOT_CONFIG")
+    ?? "appsettings.json";
+var config = AppConfigLoader.Load(configPath);
 using var httpClient = new HttpClient();
 config = await RosterClient.ApplyRosterAsync(httpClient, config);
 
@@ -80,10 +83,38 @@ Console.CancelKeyPress += (_, eventArgs) =>
     shutdown.Cancel();
 };
 
+if (args.Contains("--admin-ui-only", StringComparer.OrdinalIgnoreCase))
+{
+    // Diagnostic: serve just the config admin UI without the Riot polling loop.
+    var port = config.WebUiPort ?? throw new InvalidOperationException("Set WebUiPort to use --admin-ui-only.");
+    var token = config.WebUiToken ?? throw new InvalidOperationException("Set WebUiToken to use --admin-ui-only.");
+    await new AdminUiServer(configPath, port, token, shutdown.Cancel).RunAsync(shutdown.Token);
+    return;
+}
+
 using var sigTermRegistration = RegisterSigTermHandler(shutdown);
+
+Task? adminUiTask = null;
+if (config.WebUiPort is int webUiPort)
+{
+    if (string.IsNullOrWhiteSpace(config.WebUiToken))
+    {
+        Console.WriteLine("WebUiPort is set but WebUiToken is missing — admin UI disabled.");
+    }
+    else
+    {
+        var adminUi = new AdminUiServer(configPath, webUiPort, config.WebUiToken, shutdown.Cancel);
+        adminUiTask = adminUi.RunAsync(shutdown.Token);
+    }
+}
 
 await seasonBackfill.RunIfSeasonChangedAsync(shutdown.Token);
 await watcher.RunAsync(shutdown.Token);
+
+if (adminUiTask is not null)
+{
+    await adminUiTask;
+}
 
 static string? GetFlagValue(string[] args, string flag)
 {

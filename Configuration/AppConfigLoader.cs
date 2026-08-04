@@ -23,6 +23,10 @@ public static class AppConfigLoader
         var arenaTrackerWebhookUrl = Environment.GetEnvironmentVariable("ARENA_TRACKER_WEBHOOK_URL") ?? config.ArenaTrackerWebhookUrl;
         var arenaTrackerSyncKey = Environment.GetEnvironmentVariable("ARENA_TRACKER_SYNC_KEY") ?? config.ArenaTrackerSyncKey;
         var rosterUrl = Environment.GetEnvironmentVariable("ROSTER_URL") ?? config.RosterUrl;
+        var webUiToken = Environment.GetEnvironmentVariable("WEBUI_TOKEN") ?? config.WebUiToken;
+        var webUiPort = int.TryParse(Environment.GetEnvironmentVariable("WEBUI_PORT"), out var envPort)
+            ? envPort
+            : config.WebUiPort;
 
         if (string.IsNullOrWhiteSpace(riotApiKey) || riotApiKey.Contains("replace-me", StringComparison.OrdinalIgnoreCase))
         {
@@ -80,7 +84,9 @@ public static class AppConfigLoader
             PollIntervalSeconds = Math.Max(config.PollIntervalSeconds, 60),
             ArenaTrackerWebhookUrl = arenaTrackerWebhookUrl,
             ArenaTrackerSyncKey = arenaTrackerSyncKey,
-            RosterUrl = rosterUrl
+            RosterUrl = rosterUrl,
+            WebUiPort = webUiPort,
+            WebUiToken = webUiToken
         };
     }
 }

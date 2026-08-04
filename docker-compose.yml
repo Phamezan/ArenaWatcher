@@ -17,6 +17,11 @@ services:
         max-file: "3"
     env_file:
       - .env
+    ports:
+      # Admin web UI (token-gated, set WEBUI_TOKEN in .env). Bind to a
+      # trusted network only — the page can display secrets.
+      - "8080:8080"
     volumes:
-      - ./config/appsettings.json:/app/config/appsettings.json:ro
+      # read-write so the admin UI can save config changes
+      - ./config/appsettings.json:/app/config/appsettings.json:rw
       - ./data:/app/data
