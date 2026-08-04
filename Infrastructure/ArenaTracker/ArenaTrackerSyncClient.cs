@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using DiscordBot.Models;
 using DiscordBot.Serialization;
 
 namespace DiscordBot.Infrastructure.ArenaTracker;
@@ -12,9 +13,9 @@ namespace DiscordBot.Infrastructure.ArenaTracker;
 public sealed class ArenaTrackerSyncClient(HttpClient httpClient, string webhookUrl, string syncKey)
     : IArenaTrackerNotifier
 {
-    public async Task NotifyWinAsync(string summoner, string championName, CancellationToken cancellationToken)
+    public async Task NotifyWinAsync(ArenaWinEvent win, CancellationToken cancellationToken)
     {
-        await PostAsync(new { summoner, championName }, cancellationToken);
+        await PostAsync(win, cancellationToken);
     }
 
     public async Task NotifySnapshotAsync(object snapshot, CancellationToken cancellationToken)

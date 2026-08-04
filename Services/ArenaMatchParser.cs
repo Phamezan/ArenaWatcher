@@ -87,6 +87,49 @@ public static class ArenaMatchParser
         return CreateSummary(player.DisplayName, participant, matchId);
     }
 
+    /// <summary>
+    /// The match's real end time in epoch ms: info.gameEndTimestamp, falling
+    /// back to gameCreation + gameDuration for older payloads, and finally to
+    /// "now" if the match document is malformed.
+    /// </summary>
+    public static long GetGameEndTimestamp(JsonDocument match)
+    {
+        if (match.RootElement.TryGetProperty("info", out var info))
+        {
+            if (info.TryGetProperty("gameEndTimestamp", out var gameEnd)
+                && gameEnd.ValueKind == JsonValueKind.Number
+                && gameEnd.TryGetInt64(out var endMs))
+            {
+                return endMs;
+            }
+
+            if (info.TryGetProperty("gameCreation", out var creation)
+                && creation.ValueKind == JsonValueKind.Number
+                && creation.TryGetInt64(out var creationMs)
+                && info.TryGetProperty("gameDuration", out var duration)
+                && duration.ValueKind == JsonValueKind.Number
+                && duration.TryGetInt64(out var durationSec))
+            {
+                return creationMs + durationSec * 1000;
+            }
+        }
+
+        return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
+
+    public static ArenaWinEvent CreateWinEvent(MatchSummary summary, JsonElement participant, JsonDocument match)
+    {
+        return new ArenaWinEvent(
+            summary.PlayerName,
+            summary.ChampionName,
+            summary.MatchId,
+            GetGameEndTimestamp(match),
+            ReadInt(participant, "kills"),
+            ReadInt(participant, "deaths"),
+            ReadInt(participant, "assists"),
+            summary.ItemIds);
+    }
+
     public static MatchSummary CreateSummary(string playerName, JsonElement participant, string matchId)
     {
         var items = Enumerable.Range(0, 7)

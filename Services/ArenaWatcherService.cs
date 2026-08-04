@@ -228,7 +228,8 @@ public sealed class ArenaWatcherService(
 
         if (syncWinToArenaTracker && ArenaMatchParser.IsArenaWin(participant.Value))
         {
-            await SyncWinsToArenaTrackerAsync([summary], matchId, cancellationToken);
+            var winEvent = ArenaMatchParser.CreateWinEvent(summary, participant.Value, match);
+            await SyncWinsToArenaTrackerAsync([winEvent], matchId, cancellationToken);
         }
     }
 
@@ -399,6 +400,14 @@ public sealed class ArenaWatcherService(
             .Select(result => ArenaMatchParser.CreateSummary(result.Player, result.Participant, matchId))
             .ToArray();
 
+        var winEvents = trackedParticipants
+            .Where(result => ArenaMatchParser.IsArenaWin(result.Participant))
+            .Select(result => ArenaMatchParser.CreateWinEvent(
+                ArenaMatchParser.CreateSummary(result.Player, result.Participant, matchId),
+                result.Participant,
+                match))
+            .ToArray();
+
         foreach (var result in trackedParticipants)
         {
             var placement = ArenaMatchParser.GetPlacement(result.Participant);
@@ -412,7 +421,7 @@ public sealed class ArenaWatcherService(
             return;
         }
 
-        await SyncWinsToArenaTrackerAsync(winners, matchId, cancellationToken);
+        await SyncWinsToArenaTrackerAsync(winEvents, matchId, cancellationToken);
 
         if (winners.Length == 1)
         {
@@ -431,15 +440,15 @@ public sealed class ArenaWatcherService(
     }
 
     private async Task SyncWinsToArenaTrackerAsync(
-        IReadOnlyList<MatchSummary> winners,
+        IReadOnlyList<ArenaWinEvent> winEvents,
         string matchId,
         CancellationToken cancellationToken)
     {
-        foreach (var winner in winners)
+        foreach (var win in winEvents)
         {
             try
             {
-                await arenaTrackerNotifier.NotifyWinAsync(winner.PlayerName, winner.ChampionName, cancellationToken);
+                await arenaTrackerNotifier.NotifyWinAsync(win, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -447,7 +456,7 @@ public sealed class ArenaWatcherService(
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not sync {winner.PlayerName}'s win to arena-tracker for {matchId}: {ex.Message}");
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not sync {win.Summoner}'s win to arena-tracker for {matchId}: {ex.Message}");
             }
         }
     }
