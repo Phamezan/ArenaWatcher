@@ -447,13 +447,16 @@ public sealed class ArenaWatcherService(
     }
 
     /// <summary>
-    /// Empty/unset allowlist means "post everyone" (backwards compatible).
+    /// Unset allowlist (null) means "post everyone" (legacy behavior).
+    /// An explicitly empty list means "post nobody" — the admin UI needs to
+    /// be able to express that state.
     /// Entries match the game-name part of a Riot ID, case-insensitively.
     /// </summary>
     private bool IsDiscordPostAllowed(string playerName)
     {
         var allowlist = config.DiscordPostAllowlist;
-        if (allowlist is null || allowlist.Count == 0) return true;
+        if (allowlist is null) return true;
+        if (allowlist.Count == 0) return false;
 
         var gameName = playerName.Split('#')[0].Trim();
         return allowlist.Any(entry => string.Equals(entry.Trim(), gameName, StringComparison.OrdinalIgnoreCase));
