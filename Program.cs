@@ -87,8 +87,7 @@ if (args.Contains("--admin-ui-only", StringComparer.OrdinalIgnoreCase))
 {
     // Diagnostic: serve just the config admin UI without the Riot polling loop.
     var port = config.WebUiPort ?? throw new InvalidOperationException("Set WebUiPort to use --admin-ui-only.");
-    var token = config.WebUiToken ?? throw new InvalidOperationException("Set WebUiToken to use --admin-ui-only.");
-    await new AdminUiServer(configPath, port, token, shutdown.Cancel).RunAsync(shutdown.Token);
+    await new AdminUiServer(config, configPath, port, config.WebUiToken, shutdown.Cancel).RunAsync(shutdown.Token);
     return;
 }
 
@@ -97,14 +96,11 @@ using var sigTermRegistration = RegisterSigTermHandler(shutdown);
 Task? adminUiTask = null;
 if (config.WebUiPort is int webUiPort)
 {
+    var adminUi = new AdminUiServer(config, configPath, webUiPort, config.WebUiToken, shutdown.Cancel);
+    adminUiTask = adminUi.RunAsync(shutdown.Token);
     if (string.IsNullOrWhiteSpace(config.WebUiToken))
     {
-        Console.WriteLine("WebUiPort is set but WebUiToken is missing — admin UI disabled.");
-    }
-    else
-    {
-        var adminUi = new AdminUiServer(configPath, webUiPort, config.WebUiToken, shutdown.Cancel);
-        adminUiTask = adminUi.RunAsync(shutdown.Token);
+        Console.WriteLine("WebUiToken is not set — admin UI is unauthenticated (page shows no secrets).");
     }
 }
 

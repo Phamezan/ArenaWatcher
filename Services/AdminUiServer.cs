@@ -8,19 +8,20 @@ using DiscordBot.Serialization;
 namespace DiscordBot.Services;
 
 /// <summary>
-/// Tiny built-in admin page for editing appsettings.json from a browser.
-/// Serves a single form (GET /) and accepts saves (POST /save); after a
-/// successful save the process shuts down cleanly so docker compose
+/// Tiny built-in admin page for toggling which tracked players get Discord
+/// win posts (DiscordPostAllowlist in appsettings.json). Serves a single
+/// checkbox form (GET /) and accepts saves (POST /save); after a successful
+/// save the process shuts down cleanly so docker compose
 /// (restart: unless-stopped) brings it back up with the new config.
 ///
-/// Gated on a shared-secret token (?token=... or X-Admin-Token) because the
-/// page displays secrets (Riot API key, webhook URLs). Only bind the port to
-/// a trusted network.
+/// The page shows no secrets, so the token is optional: if WebUiToken is set,
+/// requests must carry it (?token=... or X-Admin-Token).
 /// </summary>
 public sealed class AdminUiServer(
+    AppConfig config,
     string configPath,
     int port,
-    string token,
+    string? token,
     Action requestShutdown)
 {
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -88,6 +89,7 @@ public sealed class AdminUiServer(
 
     private bool IsAuthorized(HttpListenerRequest request)
     {
+        if (string.IsNullOrEmpty(token)) return true; // token optional: page shows no secrets
         var provided = request.QueryString["token"] ?? request.Headers["X-Admin-Token"];
         return !string.IsNullOrEmpty(provided)
             && string.Equals(provided, token, StringComparison.Ordinal);
@@ -101,22 +103,6 @@ public sealed class AdminUiServer(
             ?? throw new InvalidOperationException("Empty save payload.");
 
         var json = JsonNode.Parse(await File.ReadAllTextAsync(configPath))!.AsObject();
-
-        foreach (var key in new[] { "RiotApiKey", "DiscordWebhookUrl", "RegionalRoute",
-                     "ArenaTrackerWebhookUrl", "ArenaTrackerSyncKey", "RosterUrl" })
-        {
-            if (form.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String)
-            {
-                json[key] = value.GetString();
-            }
-        }
-
-        if (form.TryGetValue("PollIntervalSeconds", out var interval)
-            && interval.ValueKind == JsonValueKind.Number
-            && interval.TryGetInt32(out var seconds))
-        {
-            json["PollIntervalSeconds"] = seconds;
-        }
 
         if (form.TryGetValue("DiscordPostAllowlist", out var allowlist)
             && allowlist.ValueKind == JsonValueKind.Array)
@@ -149,28 +135,19 @@ public sealed class AdminUiServer(
 
     private string BuildPage()
     {
-        var json = JsonNode.Parse(File.ReadAllText(configPath))!.AsObject();
-        string Get(string key) => json[key]?.GetValue<string>() ?? "";
-        var pollInterval = json["PollIntervalSeconds"]?.GetValue<int>() ?? 30;
-
         var allowlist = new HashSet<string>(
-            json["DiscordPostAllowlist"] is JsonArray arr
-                ? arr.Where(e => e is JsonValue).Select(e => e!.GetValue<string>())
-                : [],
+            config.DiscordPostAllowlist ?? [],
             StringComparer.OrdinalIgnoreCase);
 
+        // Players come from the effective config (after RosterUrl is applied),
+        // not the file — the file's TrackedPlayers can be stale or empty.
         var playersCheckboxes = new StringBuilder();
-        if (json["TrackedPlayers"] is JsonArray players)
+        foreach (var player in config.TrackedPlayers)
         {
-            foreach (var player in players)
-            {
-                var gameName = player?["GameName"]?.GetValue<string>() ?? "";
-                var tagLine = player?["TagLine"]?.GetValue<string>() ?? "";
-                var riotId = $"{gameName}#{tagLine}";
-                var isChecked = allowlist.Contains(gameName) ? " checked" : "";
-                playersCheckboxes.AppendLine(
-                    $"<label class=\"player\"><input type=\"checkbox\" name=\"allow\" value=\"{Escape(gameName)}\"{isChecked}> {Escape(riotId)}</label>");
-            }
+            var riotId = $"{player.GameName}#{player.TagLine}";
+            var isChecked = allowlist.Contains(player.GameName.Trim()) ? " checked" : "";
+            playersCheckboxes.AppendLine(
+                $"<label class=\"player\"><input type=\"checkbox\" name=\"allow\" value=\"{Escape(player.GameName)}\"{isChecked}> {Escape(riotId)}</label>");
         }
 
         return $$"""
@@ -178,23 +155,19 @@ public sealed class AdminUiServer(
             <html lang="en">
             <head>
               <meta charset="utf-8">
-              <title>ArenaWatcher config</title>
+              <title>ArenaWatcher — Discord posts</title>
               <meta name="viewport" content="width=device-width, initial-scale=1">
               <style>
                 body { margin: 0; padding: 32px; background: #0b0e14; color: #e6e6e6;
                        font-family: system-ui, sans-serif; }
-                main { max-width: 560px; margin: 0 auto; }
+                main { max-width: 420px; margin: 0 auto; }
                 h1 { font-size: 1.3em; }
-                label { display: block; margin: 14px 0 4px; color: #8b93a3; font-size: 0.85em; }
-                input[type=text], input[type=number] {
-                  width: 100%; box-sizing: border-box; padding: 8px 10px;
-                  background: #161b26; border: 1px solid #2a2f3a; border-radius: 6px; color: #e6e6e6;
-                }
-                fieldset { border: 1px solid #2a2f3a; border-radius: 8px; margin-top: 20px; }
-                legend { color: #8b93a3; font-size: 0.85em; padding: 0 6px; }
-                label.player { display: flex; gap: 8px; align-items: center; margin: 6px 0;
-                               color: #e6e6e6; font-size: 0.95em; }
-                button { margin-top: 24px; padding: 10px 22px; border: 1px solid #0ac8b9;
+                p.sub { color: #8b93a3; font-size: 0.85em; }
+                label.player { display: flex; gap: 8px; align-items: center; margin: 8px 0;
+                               padding: 10px 12px; background: #161b26; border: 1px solid #2a2f3a;
+                               border-radius: 8px; cursor: pointer; }
+                label.player:hover { border-color: #0ac8b9; }
+                button { margin-top: 20px; padding: 10px 22px; border: 1px solid #0ac8b9;
                          background: #0ac8b9; color: #0b0e14; font-weight: 700; border-radius: 6px;
                          cursor: pointer; }
                 #status { margin-top: 12px; font-size: 0.85em; color: #8b93a3; }
@@ -202,28 +175,10 @@ public sealed class AdminUiServer(
             </head>
             <body>
             <main>
-              <h1>ArenaWatcher config</h1>
+              <h1>Discord win posts</h1>
+              <p class="sub">Checked players get their Arena wins posted to Discord. The arena-tracker dashboard still updates for everyone.</p>
               <form id="f">
-                <label>Riot API key</label>
-                <input type="text" name="RiotApiKey" value="{{Escape(Get("RiotApiKey"))}}">
-                <label>Discord webhook URL</label>
-                <input type="text" name="DiscordWebhookUrl" value="{{Escape(Get("DiscordWebhookUrl"))}}">
-                <label>Regional route</label>
-                <input type="text" name="RegionalRoute" value="{{Escape(Get("RegionalRoute"))}}">
-                <label>Poll interval (seconds)</label>
-                <input type="number" name="PollIntervalSeconds" value="{{pollInterval}}" min="60">
-                <label>Arena tracker webhook URL</label>
-                <input type="text" name="ArenaTrackerWebhookUrl" value="{{Escape(Get("ArenaTrackerWebhookUrl"))}}">
-                <label>Arena tracker sync key</label>
-                <input type="text" name="ArenaTrackerSyncKey" value="{{Escape(Get("ArenaTrackerSyncKey"))}}">
-                <label>Roster URL</label>
-                <input type="text" name="RosterUrl" value="{{Escape(Get("RosterUrl"))}}">
-
-                <fieldset>
-                  <legend>Discord win posts (checked = posted)</legend>
-                  {{playersCheckboxes}}
-                </fieldset>
-
+                {{playersCheckboxes}}
                 <button type="submit">Save &amp; restart</button>
                 <div id="status"></div>
               </form>
@@ -233,22 +188,12 @@ public sealed class AdminUiServer(
               document.getElementById("f").addEventListener("submit", async (e) => {
                 e.preventDefault();
                 const fd = new FormData(e.target);
-                const payload = {
-                  RiotApiKey: fd.get("RiotApiKey"),
-                  DiscordWebhookUrl: fd.get("DiscordWebhookUrl"),
-                  RegionalRoute: fd.get("RegionalRoute"),
-                  PollIntervalSeconds: Number(fd.get("PollIntervalSeconds")),
-                  ArenaTrackerWebhookUrl: fd.get("ArenaTrackerWebhookUrl"),
-                  ArenaTrackerSyncKey: fd.get("ArenaTrackerSyncKey"),
-                  RosterUrl: fd.get("RosterUrl"),
-                  DiscordPostAllowlist: fd.getAll("allow"),
-                };
                 const status = document.getElementById("status");
                 status.textContent = "Saving...";
                 const resp = await fetch("/save?token=" + encodeURIComponent(token), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(payload),
+                  body: JSON.stringify({ DiscordPostAllowlist: fd.getAll("allow") }),
                 });
                 status.textContent = resp.ok
                   ? "Saved. The watcher is restarting with the new config (give it a few seconds)."
