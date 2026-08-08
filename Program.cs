@@ -96,7 +96,8 @@ using var sigTermRegistration = RegisterSigTermHandler(shutdown);
 Task? adminUiTask = null;
 if (config.WebUiPort is int webUiPort)
 {
-    var adminUi = new AdminUiServer(config, configPath, webUiPort, config.WebUiToken, shutdown.Cancel);
+    var commandRunner = new AdminCommandRunner(watcher, seasonBackfill, matchCardRenderer, shutdown.Cancel);
+    var adminUi = new AdminUiServer(config, configPath, webUiPort, config.WebUiToken, shutdown.Cancel, commandRunner);
     adminUiTask = adminUi.RunAsync(shutdown.Token);
     if (string.IsNullOrWhiteSpace(config.WebUiToken))
     {

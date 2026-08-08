@@ -175,6 +175,17 @@ You can run any of the application's CLI subcommands using temporary containers 
   docker compose run --rm arena-watcher --render-layout-test
   ```
 
+### Admin Web UI (run commands from the browser)
+
+Every command above can also be run from the built-in admin page at
+`http://<server>:8091/?token=$WEBUI_TOKEN` (set `WEBUI_TOKEN` in `.env`).
+Each command is listed with a description and a Run button; output streams
+into the page and only one command runs at a time. The commands execute
+**in-process** — no separate container is spawned, so it's faster and there
+is nothing extra to install. Docker-level operations (`up -d --build`,
+`logs`, `ps`, `git pull`) are not in the page; run those on the host as
+before (logs are also visible in Dozzle).
+
 ---
 
 ## 5. Updating & Maintenance
