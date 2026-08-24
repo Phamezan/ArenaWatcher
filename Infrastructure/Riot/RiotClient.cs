@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using DiscordBot.Models;
 using DiscordBot.Serialization;
@@ -63,42 +64,75 @@ public sealed class RiotClient(HttpClient httpClient, string apiKey, string regi
 
     private async Task<T> GetJsonAsync<T>(string url, CancellationToken cancellationToken)
     {
+        using var response = await SendWithRetryAsync(url, cancellationToken);
+
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions.Default, cancellationToken)
+            ?? throw new InvalidOperationException($"Riot returned an empty response for {url}.");
+    }
+
+    private async Task<JsonDocument> GetJsonDocumentAsync(string url, CancellationToken cancellationToken)
+    {
+        using var response = await SendWithRetryAsync(url, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends the request, retrying both retryable status codes and transient
+    /// transport failures (DNS hiccups, dropped connections, request timeouts).
+    /// </summary>
+    private async Task<HttpResponseMessage> SendWithRetryAsync(string url, CancellationToken cancellationToken)
+    {
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            using var request = BuildRequest(url);
-            using var response = await httpClient.SendAsync(request, cancellationToken);
-            if (await ShouldRetryAsync(response, attempt, cancellationToken))
+            HttpResponseMessage response;
+            try
             {
+                using var request = BuildRequest(url);
+                response = await httpClient.SendAsync(request, cancellationToken);
+            }
+            catch (Exception ex) when (attempt < MaxAttempts && IsTransientTransportFailure(ex, cancellationToken))
+            {
+                var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Riot API request failed ({ex.GetType().Name}: {ex.Message}); retrying in {backoff.TotalSeconds:0.#}s.");
+                await Task.Delay(backoff, cancellationToken);
                 continue;
             }
 
-            await EnsureSuccessAsync(response, cancellationToken);
+            if (await ShouldRetryAsync(response, attempt, cancellationToken))
+            {
+                response.Dispose();
+                continue;
+            }
 
-            return await response.Content.ReadFromJsonAsync<T>(JsonOptions.Default, cancellationToken)
-                ?? throw new InvalidOperationException($"Riot returned an empty response for {url}.");
+            try
+            {
+                await EnsureSuccessAsync(response, cancellationToken);
+            }
+            catch
+            {
+                response.Dispose();
+                throw;
+            }
+
+            return response;
         }
 
         throw new HttpRequestException($"Riot API request failed after {MaxAttempts} attempts: {url}");
     }
 
-    private async Task<JsonDocument> GetJsonDocumentAsync(string url, CancellationToken cancellationToken)
+    private static bool IsTransientTransportFailure(Exception ex, CancellationToken cancellationToken)
     {
-        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        // A caller-requested cancellation is not a transport failure; never retry it.
+        if (cancellationToken.IsCancellationRequested)
         {
-            using var request = BuildRequest(url);
-            using var response = await httpClient.SendAsync(request, cancellationToken);
-            if (await ShouldRetryAsync(response, attempt, cancellationToken))
-            {
-                continue;
-            }
-
-            await EnsureSuccessAsync(response, cancellationToken);
-
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            return false;
         }
 
-        throw new HttpRequestException($"Riot API request failed after {MaxAttempts} attempts: {url}");
+        return ex is HttpRequestException or SocketException or IOException
+            // HttpClient surfaces its own request timeout as TaskCanceledException.
+            or TaskCanceledException;
     }
 
     private HttpRequestMessage BuildRequest(string url)

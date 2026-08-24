@@ -10,4 +10,7 @@ public sealed class NullArenaTrackerNotifier : IArenaTrackerNotifier
 
     public Task NotifySnapshotAsync(object snapshot, CancellationToken cancellationToken) =>
         Task.CompletedTask;
+
+    public Task NotifyHealthAsync(WatcherHealth health, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }

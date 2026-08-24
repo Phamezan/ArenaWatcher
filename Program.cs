@@ -12,7 +12,18 @@ var configPath = GetConfigPath(args)
     ?? Environment.GetEnvironmentVariable("ARENA_BOT_CONFIG")
     ?? "appsettings.json";
 var config = AppConfigLoader.Load(configPath);
-using var httpClient = new HttpClient();
+// Recycle pooled connections so DNS changes (and stale upstream sockets) are
+// picked up instead of being held for the life of the process.
+using var httpHandler = new SocketsHttpHandler
+{
+    PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+    ConnectTimeout = TimeSpan.FromSeconds(15),
+};
+using var httpClient = new HttpClient(httpHandler)
+{
+    Timeout = TimeSpan.FromSeconds(30),
+};
 config = await RosterClient.ApplyRosterAsync(httpClient, config);
 
 var riotClient = new RiotClient(httpClient, config.RiotApiKey, config.RegionalRoute);

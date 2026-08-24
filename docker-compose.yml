@@ -17,6 +17,11 @@ services:
         max-file: "3"
     env_file:
       - .env
+    # Pin resolvers: the default embedded/host resolver has returned EAI_AGAIN
+    # ("Resource temporarily unavailable") for the Riot API hosts.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       # Admin web UI (token-gated, set WEBUI_TOKEN in .env). Bind to a
       # trusted network only — the page can display secrets.

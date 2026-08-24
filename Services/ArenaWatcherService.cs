@@ -114,7 +114,8 @@ public sealed class ArenaWatcherService(
         while (!cancellationToken.IsCancellationRequested)
         {
             Console.WriteLine($"[{DateTimeOffset.Now:t}] Polling Riot for recent matches...");
-            await CheckTrackedPlayersAsync(trackedPlayers, cancellationToken);
+            var outcome = await CheckTrackedPlayersAsync(trackedPlayers, cancellationToken);
+            await ReportHealthAsync(outcome, cancellationToken);
 
             await seenMatchStore.SaveAsync();
             await Task.Delay(TimeSpan.FromSeconds(config.PollIntervalSeconds), cancellationToken);
@@ -307,11 +308,13 @@ public sealed class ArenaWatcherService(
         Console.WriteLine($"[{DateTimeOffset.Now:t}] Posted group test for placement {placement?.ToString() ?? "unknown"} in {matchId}.");
     }
 
-    private async Task CheckTrackedPlayersAsync(
+    private async Task<WatcherHealth> CheckTrackedPlayersAsync(
         IReadOnlyList<TrackedPlayer> trackedPlayers,
         CancellationToken cancellationToken)
     {
         var candidateMatches = new Dictionary<string, HashSet<string>>();
+        var failed = 0;
+        string? firstError = null;
 
         foreach (var player in trackedPlayers)
         {
@@ -342,7 +345,9 @@ public sealed class ArenaWatcherService(
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{DateTimeOffset.Now:t}] {player.DisplayName}: {ex.Message}");
+                failed++;
+                firstError ??= ex.Message;
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] {player.DisplayName}: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -360,6 +365,28 @@ public sealed class ArenaWatcherService(
             {
                 Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not process {matchId}: {ex.Message}");
             }
+        }
+
+        return WatcherHealth.From(trackedPlayers.Count, failed, firstError, config.PollIntervalSeconds);
+    }
+
+    /// <summary>
+    /// Tells the dashboard how the last pass went. Never throws: a sync outage
+    /// must not stop the watcher from polling Riot.
+    /// </summary>
+    private async Task ReportHealthAsync(WatcherHealth health, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await arenaTrackerNotifier.NotifyHealthAsync(health, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not report watcher health: {ex.Message}");
         }
     }
 

@@ -23,11 +23,19 @@ public sealed class ArenaTrackerSyncClient(HttpClient httpClient, string webhook
         await PostAsync(snapshot, cancellationToken);
     }
 
-    private async Task PostAsync(object payload, CancellationToken cancellationToken)
+    public async Task NotifyHealthAsync(WatcherHealth health, CancellationToken cancellationToken)
+    {
+        await PostAsync(health, cancellationToken, HeartbeatUrl());
+    }
+
+    /// <summary>The Worker serves heartbeats on /heartbeat, next to the sync endpoint.</summary>
+    private string HeartbeatUrl() => new UriBuilder(webhookUrl) { Path = "/heartbeat", Query = string.Empty }.Uri.ToString();
+
+    private async Task PostAsync(object payload, CancellationToken cancellationToken, string? url = null)
     {
         var json = JsonSerializer.Serialize(payload, JsonOptions.Default);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, webhookUrl)
+        using var request = new HttpRequestMessage(HttpMethod.Post, url ?? webhookUrl)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
