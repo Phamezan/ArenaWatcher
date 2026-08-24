@@ -3,6 +3,7 @@ using DiscordBot.Infrastructure.ArenaTracker;
 using DiscordBot.Infrastructure.Discord;
 using DiscordBot.Infrastructure.LeagueAssets;
 using DiscordBot.Infrastructure.Riot;
+using DiscordBot.Models;
 using DiscordBot.Persistence;
 using DiscordBot.Rendering;
 using DiscordBot.Services;
@@ -24,14 +25,25 @@ using var httpClient = new HttpClient(httpHandler)
 {
     Timeout = TimeSpan.FromSeconds(30),
 };
-config = await RosterClient.ApplyRosterAsync(httpClient, config);
-
-var riotClient = new RiotClient(httpClient, config.RiotApiKey, config.RegionalRoute);
-var discordClient = new DiscordWebhookClient(httpClient, config.DiscordWebhookUrl);
 IArenaTrackerNotifier arenaTrackerNotifier =
     string.IsNullOrWhiteSpace(config.ArenaTrackerWebhookUrl) || string.IsNullOrWhiteSpace(config.ArenaTrackerSyncKey)
         ? new NullArenaTrackerNotifier()
         : new ArenaTrackerSyncClient(httpClient, config.ArenaTrackerWebhookUrl, config.ArenaTrackerSyncKey);
+
+try
+{
+    config = await RosterClient.ApplyRosterAsync(httpClient, config);
+}
+catch (Exception ex)
+{
+    // Startup failures never reach a poll cycle, so without this the dashboard
+    // would only see silence and blame the watcher for "not reporting in".
+    await ReportStartupFailureAsync(arenaTrackerNotifier, ex, config.PollIntervalSeconds);
+    throw;
+}
+
+var riotClient = new RiotClient(httpClient, config.RiotApiKey, config.RegionalRoute);
+var discordClient = new DiscordWebhookClient(httpClient, config.DiscordWebhookUrl);
 var leagueAssetProvider = new LeagueAssetProvider(httpClient);
 var matchCardRenderer = new MatchCardRenderer(httpClient);
 var seenMatchStore = await SeenMatchStore.LoadAsync(config.SeenMatchesPath);
@@ -137,6 +149,24 @@ static string? GetFlagValue(string[] args, string flag)
     }
 
     return null;
+}
+
+static async Task ReportStartupFailureAsync(
+    IArenaTrackerNotifier notifier,
+    Exception ex,
+    int pollIntervalSeconds)
+{
+    var health = WatcherHealth.Startup($"{ex.GetType().Name}: {ex.Message}", pollIntervalSeconds);
+    Console.WriteLine($"[{DateTimeOffset.Now:t}] {health.Summary}");
+
+    try
+    {
+        await notifier.NotifyHealthAsync(health, CancellationToken.None);
+    }
+    catch (Exception reportEx)
+    {
+        Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not report startup failure: {reportEx.Message}");
+    }
 }
 
 static string? GetConfigPath(string[] args)

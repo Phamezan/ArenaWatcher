@@ -18,6 +18,21 @@ public sealed record WatcherHealth(
     public const string Degraded = "degraded";
     public const string Down = "down";
 
+    /// <summary>The process died before it ever polled (e.g. the roster fetch failed).</summary>
+    public const string StartupFailed = "startup-failed";
+
+    public static WatcherHealth Startup(string error, int pollIntervalSeconds) =>
+        new(StartupFailed, error, PlayersChecked: 0, PlayersFailed: 0, pollIntervalSeconds);
+
+    /// <summary>Single-line summary for the container log.</summary>
+    [JsonIgnore]
+    public string Summary => Status switch
+    {
+        Ok => $"health ok: {PlayersChecked} player(s) checked",
+        StartupFailed => $"health startup-failed: {Error}",
+        _ => $"health {Status}: {PlayersFailed}/{PlayersChecked} player(s) failed: {Error}",
+    };
+
     public static WatcherHealth From(int checkedCount, int failedCount, string? error, int pollIntervalSeconds)
     {
         var status = failedCount == 0 ? Ok

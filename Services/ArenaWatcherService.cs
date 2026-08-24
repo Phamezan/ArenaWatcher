@@ -376,6 +376,10 @@ public sealed class ArenaWatcherService(
     /// </summary>
     private async Task ReportHealthAsync(WatcherHealth health, CancellationToken cancellationToken)
     {
+        // Logged unconditionally so the poll result is visible in the container
+        // log (Dozzle), not only on the dashboard banner.
+        Console.WriteLine($"[{DateTimeOffset.Now:t}] {health.Summary}");
+
         try
         {
             await arenaTrackerNotifier.NotifyHealthAsync(health, cancellationToken);
