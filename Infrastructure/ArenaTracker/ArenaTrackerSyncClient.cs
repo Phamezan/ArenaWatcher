@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using DiscordBot.Infrastructure.Http;
 using DiscordBot.Models;
 using DiscordBot.Serialization;
 
@@ -13,6 +14,8 @@ namespace DiscordBot.Infrastructure.ArenaTracker;
 public sealed class ArenaTrackerSyncClient(HttpClient httpClient, string webhookUrl, string syncKey)
     : IArenaTrackerNotifier
 {
+    private const int MaxAttempts = 3;
+
     public async Task NotifyWinAsync(ArenaWinEvent win, CancellationToken cancellationToken)
     {
         await PostAsync(win, cancellationToken);
@@ -35,17 +38,43 @@ public sealed class ArenaTrackerSyncClient(HttpClient httpClient, string webhook
     {
         var json = JsonSerializer.Serialize(payload, JsonOptions.Default);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url ?? webhookUrl)
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-        request.Headers.Add("X-Sync-Key", syncKey);
+        var target = url ?? webhookUrl;
 
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new HttpRequestException($"Arena tracker sync returned {(int)response.StatusCode} {response.ReasonPhrase}: {body}");
+            var lastAttempt = attempt == MaxAttempts;
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, target)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                request.Headers.Add("X-Sync-Key", syncKey);
+
+                using var response = await httpClient.SendAsync(request, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                var failure = new HttpRequestException(
+                    $"Arena tracker sync returned {(int)response.StatusCode} {response.ReasonPhrase}: {body}");
+
+                // 4xx means this payload will never be accepted; only 5xx is worth another try.
+                if (lastAttempt || (int)response.StatusCode < 500)
+                {
+                    throw failure;
+                }
+
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Arena tracker sync returned {(int)response.StatusCode}; retry {attempt}/{MaxAttempts - 1}.");
+            }
+            catch (Exception ex) when (!lastAttempt && TransientHttpFailure.Matches(ex, cancellationToken))
+            {
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Arena tracker sync failed ({ex.GetType().Name}: {ex.Message}); retry {attempt}/{MaxAttempts - 1}.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), cancellationToken);
         }
     }
 }

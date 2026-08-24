@@ -11,6 +11,9 @@ public sealed class RiotClient(HttpClient httpClient, string apiKey, string regi
 {
     private const int MaxAttempts = 3;
 
+    /// <summary>Per-request deadline. Riot answers in well under a second when healthy.</summary>
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
+
     public async Task<RiotAccount> GetAccountByRiotIdAsync(
         string gameName,
         string tagLine,
@@ -87,10 +90,13 @@ public sealed class RiotClient(HttpClient httpClient, string apiKey, string regi
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
             HttpResponseMessage response;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(RequestTimeout);
+
             try
             {
                 using var request = BuildRequest(url);
-                response = await httpClient.SendAsync(request, cancellationToken);
+                response = await httpClient.SendAsync(request, timeout.Token);
             }
             catch (Exception ex) when (attempt < MaxAttempts && TransientHttpFailure.Matches(ex, cancellationToken))
             {

@@ -16,6 +16,7 @@ public sealed class ArenaWatcherService(
     ILeagueAssetProvider leagueAssetProvider,
     IMatchCardRenderer matchCardRenderer,
     SeenMatchStore seenMatchStore,
+    PendingWinStore pendingWinStore,
     AppConfig config)
 {
     public async Task PostLatestMatchForTrackedPlayersAsync(CancellationToken cancellationToken = default)
@@ -113,11 +114,14 @@ public sealed class ArenaWatcherService(
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            await RetryPendingWinsAsync(cancellationToken);
+
             Console.WriteLine($"[{DateTimeOffset.Now:t}] Polling Riot for recent matches...");
             var outcome = await CheckTrackedPlayersAsync(trackedPlayers, cancellationToken);
             await ReportHealthAsync(outcome, cancellationToken);
 
             await seenMatchStore.SaveAsync();
+            await pendingWinStore.SaveAsync();
             await Task.Delay(TimeSpan.FromSeconds(config.PollIntervalSeconds), cancellationToken);
         }
 
@@ -371,6 +375,39 @@ public sealed class ArenaWatcherService(
     }
 
     /// <summary>
+    /// Resends wins whose sync failed on an earlier cycle. The worker dedupes on
+    /// matchId, so a win that did land after all is absorbed harmlessly.
+    /// </summary>
+    private async Task RetryPendingWinsAsync(CancellationToken cancellationToken)
+    {
+        var pending = pendingWinStore.Drain();
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        Console.WriteLine($"[{DateTimeOffset.Now:t}] Retrying {pending.Count} queued win sync(s).");
+
+        foreach (var win in pending)
+        {
+            try
+            {
+                await arenaTrackerNotifier.NotifyWinAsync(win, cancellationToken);
+                pendingWinStore.Remove(win);
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Resynced {win.Summoner}'s win for {win.MatchId}.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Still cannot sync {win.Summoner}'s win for {win.MatchId}: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Tells the dashboard how the last pass went. Never throws: a sync outage
     /// must not stop the watcher from polling Riot.
     /// </summary>
@@ -510,7 +547,10 @@ public sealed class ArenaWatcherService(
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not sync {win.Summoner}'s win to arena-tracker for {matchId}: {ex.Message}");
+                // The match is marked seen below regardless, so without queueing
+                // this the win would never reach the dashboard.
+                pendingWinStore.Add(win);
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not sync {win.Summoner}'s win to arena-tracker for {matchId}: {ex.Message} (queued for retry)");
             }
         }
     }

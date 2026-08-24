@@ -21,10 +21,11 @@ using var httpHandler = new SocketsHttpHandler
     PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
     ConnectTimeout = TimeSpan.FromSeconds(15),
 };
-using var httpClient = new HttpClient(httpHandler)
-{
-    Timeout = TimeSpan.FromSeconds(30),
-};
+// No global request timeout: a Riot call and an arena-tracker sync (which
+// drives a chain of GitHub commits) have very different budgets. RiotClient
+// applies its own per-request deadline; ConnectTimeout above still bounds a
+// dead host, which is what the handler was added for.
+using var httpClient = new HttpClient(httpHandler);
 IArenaTrackerNotifier arenaTrackerNotifier =
     string.IsNullOrWhiteSpace(config.ArenaTrackerWebhookUrl) || string.IsNullOrWhiteSpace(config.ArenaTrackerSyncKey)
         ? new NullArenaTrackerNotifier()
@@ -47,7 +48,9 @@ var discordClient = new DiscordWebhookClient(httpClient, config.DiscordWebhookUr
 var leagueAssetProvider = new LeagueAssetProvider(httpClient);
 var matchCardRenderer = new MatchCardRenderer(httpClient);
 var seenMatchStore = await SeenMatchStore.LoadAsync(config.SeenMatchesPath);
-var watcher = new ArenaWatcherService(riotClient, discordClient, arenaTrackerNotifier, leagueAssetProvider, matchCardRenderer, seenMatchStore, config);
+var pendingWinStore = await PendingWinStore.LoadAsync(
+    Path.Combine(Path.GetDirectoryName(config.SeenMatchesPath) ?? ".", "pending-wins.json"));
+var watcher = new ArenaWatcherService(riotClient, discordClient, arenaTrackerNotifier, leagueAssetProvider, matchCardRenderer, seenMatchStore, pendingWinStore, config);
 var seasonBackfill = new SeasonBackfillService(riotClient, leagueAssetProvider, arenaTrackerNotifier, httpClient, config);
 
 if (args.Contains("--backfill-season", StringComparer.OrdinalIgnoreCase))
