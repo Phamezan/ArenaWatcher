@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using DiscordBot.Configuration;
+using DiscordBot.Infrastructure.Http;
 using DiscordBot.Serialization;
 
 namespace DiscordBot.Infrastructure.ArenaTracker;
@@ -13,7 +14,16 @@ namespace DiscordBot.Infrastructure.ArenaTracker;
 /// </summary>
 public static class RosterClient
 {
-    public static async Task<AppConfig> ApplyRosterAsync(HttpClient httpClient, AppConfig config)
+    // The roster is fetched once at startup and a failure is fatal when
+    // appsettings has no TrackedPlayers fallback, so this retries for longer
+    // than a mid-run API call would: a boot during a DNS outage should wait
+    // it out rather than crash-loop the container.
+    private const int MaxAttempts = 5;
+
+    public static async Task<AppConfig> ApplyRosterAsync(
+        HttpClient httpClient,
+        AppConfig config,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(config.RosterUrl))
         {
@@ -22,7 +32,7 @@ public static class RosterClient
 
         try
         {
-            var riotIds = await httpClient.GetFromJsonAsync<List<string>>(config.RosterUrl, JsonOptions.Default);
+            var riotIds = await FetchRosterAsync(httpClient, config.RosterUrl, cancellationToken);
             var players = (riotIds ?? [])
                 .Select(id => id.Split('#', 2))
                 .Where(parts => parts.Length == 2
@@ -50,5 +60,28 @@ public static class RosterClient
             throw new InvalidOperationException(
                 $"Could not load roster from {config.RosterUrl} and TrackedPlayers is empty: {ex.Message}", ex);
         }
+    }
+
+    private static async Task<List<string>?> FetchRosterAsync(
+        HttpClient httpClient,
+        string url,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            try
+            {
+                return await httpClient.GetFromJsonAsync<List<string>>(url, JsonOptions.Default, cancellationToken);
+            }
+            catch (Exception ex) when (attempt < MaxAttempts && TransientHttpFailure.Matches(ex, cancellationToken))
+            {
+                var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                Console.WriteLine($"[{DateTimeOffset.Now:t}] Could not fetch roster ({ex.GetType().Name}: {ex.Message}); retrying in {backoff.TotalSeconds:0.#}s.");
+                await Task.Delay(backoff, cancellationToken);
+            }
+        }
+
+        // Unreachable: the final attempt rethrows rather than matching the filter.
+        throw new HttpRequestException($"Roster fetch failed after {MaxAttempts} attempts: {url}");
     }
 }

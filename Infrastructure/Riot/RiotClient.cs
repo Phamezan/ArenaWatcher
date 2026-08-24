@@ -1,7 +1,7 @@
 using System.Net.Http.Json;
 using System.Net;
-using System.Net.Sockets;
 using System.Text.Json;
+using DiscordBot.Infrastructure.Http;
 using DiscordBot.Models;
 using DiscordBot.Serialization;
 
@@ -92,7 +92,7 @@ public sealed class RiotClient(HttpClient httpClient, string apiKey, string regi
                 using var request = BuildRequest(url);
                 response = await httpClient.SendAsync(request, cancellationToken);
             }
-            catch (Exception ex) when (attempt < MaxAttempts && IsTransientTransportFailure(ex, cancellationToken))
+            catch (Exception ex) when (attempt < MaxAttempts && TransientHttpFailure.Matches(ex, cancellationToken))
             {
                 var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                 Console.WriteLine($"[{DateTimeOffset.Now:t}] Riot API request failed ({ex.GetType().Name}: {ex.Message}); retrying in {backoff.TotalSeconds:0.#}s.");
@@ -120,19 +120,6 @@ public sealed class RiotClient(HttpClient httpClient, string apiKey, string regi
         }
 
         throw new HttpRequestException($"Riot API request failed after {MaxAttempts} attempts: {url}");
-    }
-
-    private static bool IsTransientTransportFailure(Exception ex, CancellationToken cancellationToken)
-    {
-        // A caller-requested cancellation is not a transport failure; never retry it.
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return false;
-        }
-
-        return ex is HttpRequestException or SocketException or IOException
-            // HttpClient surfaces its own request timeout as TaskCanceledException.
-            or TaskCanceledException;
     }
 
     private HttpRequestMessage BuildRequest(string url)
